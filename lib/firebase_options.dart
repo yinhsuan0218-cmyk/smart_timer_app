@@ -41,48 +41,48 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyCdkKDtU5uOhZ4LyDAUm2qdDlgjyvHCoxo',
-    appId: '1:596166230224:web:3f790bf236d486f3a15ed5',
-    messagingSenderId: '596166230224',
-    projectId: 'smart-timer-app',
-    authDomain: 'smart-timer-app.firebaseapp.com',
-    storageBucket: 'smart-timer-app.firebasestorage.app',
-    measurementId: 'G-33S0W0X9HB',
+    apiKey: 'AIzaSyATsIavDc5BnGdorR9BUmRpV4a-F6Q1sCU',
+    appId: '1:100780475148:web:48555cecfab24bc4047f29',
+    messagingSenderId: '100780475148',
+    projectId: 'smart-timer-app-7da95',
+    authDomain: 'smart-timer-app-7da95.firebaseapp.com',
+    storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
+    measurementId: 'G-P42Q4DPCJJ',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDMJLbgolEBV7MY-O-Ibi9s_iBkNxvGUbs',
-    appId: '1:596166230224:android:fbb50862266e3eeda15ed5',
-    messagingSenderId: '596166230224',
-    projectId: 'smart-timer-app',
-    storageBucket: 'smart-timer-app.firebasestorage.app',
+    apiKey: 'AIzaSyAhhPjZJq1G47heh7sCDZpIybD0UXuwLV0',
+    appId: '1:100780475148:android:087411f4a69301a0047f29',
+    messagingSenderId: '100780475148',
+    projectId: 'smart-timer-app-7da95',
+    storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyAerBip2fIQyMSB-RqfZ9zMBQS-I8pcxUc',
-    appId: '1:596166230224:ios:479696b90d129421a15ed5',
-    messagingSenderId: '596166230224',
-    projectId: 'smart-timer-app',
-    storageBucket: 'smart-timer-app.firebasestorage.app',
+    apiKey: 'AIzaSyCOAPIstBbeywzOWYYMxe-bdlASjONT-4Q',
+    appId: '1:100780475148:ios:140d08627e1824f2047f29',
+    messagingSenderId: '100780475148',
+    projectId: 'smart-timer-app-7da95',
+    storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
     iosBundleId: 'com.example.smartTimerApp',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyAerBip2fIQyMSB-RqfZ9zMBQS-I8pcxUc',
-    appId: '1:596166230224:ios:479696b90d129421a15ed5',
-    messagingSenderId: '596166230224',
-    projectId: 'smart-timer-app',
-    storageBucket: 'smart-timer-app.firebasestorage.app',
+    apiKey: 'AIzaSyCOAPIstBbeywzOWYYMxe-bdlASjONT-4Q',
+    appId: '1:100780475148:ios:140d08627e1824f2047f29',
+    messagingSenderId: '100780475148',
+    projectId: 'smart-timer-app-7da95',
+    storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
     iosBundleId: 'com.example.smartTimerApp',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCdkKDtU5uOhZ4LyDAUm2qdDlgjyvHCoxo',
-    appId: '1:596166230224:web:f6d3a09b7695bcaba15ed5',
-    messagingSenderId: '596166230224',
-    projectId: 'smart-timer-app',
-    authDomain: 'smart-timer-app.firebaseapp.com',
-    storageBucket: 'smart-timer-app.firebasestorage.app',
-    measurementId: 'G-E3XZ0ZRYX3',
+    apiKey: 'AIzaSyATsIavDc5BnGdorR9BUmRpV4a-F6Q1sCU',
+    appId: '1:100780475148:web:994a73143491d08a047f29',
+    messagingSenderId: '100780475148',
+    projectId: 'smart-timer-app-7da95',
+    authDomain: 'smart-timer-app-7da95.firebaseapp.com',
+    storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
+    measurementId: 'G-2P76KM5LYX',
   );
 }

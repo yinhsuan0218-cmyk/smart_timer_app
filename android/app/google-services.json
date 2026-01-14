@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "596166230224",
-    "project_id": "smart-timer-app",
-    "storage_bucket": "smart-timer-app.firebasestorage.app"
+    "project_number": "100780475148",
+    "project_id": "smart-timer-app-7da95",
+    "storage_bucket": "smart-timer-app-7da95.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:596166230224:android:fbb50862266e3eeda15ed5",
+        "mobilesdk_app_id": "1:100780475148:android:087411f4a69301a0047f29",
         "android_client_info": {
           "package_name": "com.example.smart_timer_app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDMJLbgolEBV7MY-O-Ibi9s_iBkNxvGUbs"
+          "current_key": "AIzaSyAhhPjZJq1G47heh7sCDZpIybD0UXuwLV0"
         }
       ],
       "services": {
