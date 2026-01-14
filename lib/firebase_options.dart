@@ -46,6 +46,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '100780475148',
     projectId: 'smart-timer-app-7da95',
     authDomain: 'smart-timer-app-7da95.firebaseapp.com',
+    databaseURL: 'https://smart-timer-app-7da95-default-rtdb.firebaseio.com',
     storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
     measurementId: 'G-P42Q4DPCJJ',
   );
@@ -55,6 +56,7 @@ class DefaultFirebaseOptions {
     appId: '1:100780475148:android:087411f4a69301a0047f29',
     messagingSenderId: '100780475148',
     projectId: 'smart-timer-app-7da95',
+    databaseURL: 'https://smart-timer-app-7da95-default-rtdb.firebaseio.com',
     storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
   );
 
@@ -63,7 +65,9 @@ class DefaultFirebaseOptions {
     appId: '1:100780475148:ios:140d08627e1824f2047f29',
     messagingSenderId: '100780475148',
     projectId: 'smart-timer-app-7da95',
+    databaseURL: 'https://smart-timer-app-7da95-default-rtdb.firebaseio.com',
     storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
+    iosClientId: '100780475148-o194dr46rn64883acjhd4b59iga1rjv9.apps.googleusercontent.com',
     iosBundleId: 'com.example.smartTimerApp',
   );
 
@@ -72,7 +76,9 @@ class DefaultFirebaseOptions {
     appId: '1:100780475148:ios:140d08627e1824f2047f29',
     messagingSenderId: '100780475148',
     projectId: 'smart-timer-app-7da95',
+    databaseURL: 'https://smart-timer-app-7da95-default-rtdb.firebaseio.com',
     storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
+    iosClientId: '100780475148-o194dr46rn64883acjhd4b59iga1rjv9.apps.googleusercontent.com',
     iosBundleId: 'com.example.smartTimerApp',
   );
 
@@ -82,7 +88,9 @@ class DefaultFirebaseOptions {
     messagingSenderId: '100780475148',
     projectId: 'smart-timer-app-7da95',
     authDomain: 'smart-timer-app-7da95.firebaseapp.com',
+    databaseURL: 'https://smart-timer-app-7da95-default-rtdb.firebaseio.com',
     storageBucket: 'smart-timer-app-7da95.firebasestorage.app',
     measurementId: 'G-2P76KM5LYX',
   );
+
 }

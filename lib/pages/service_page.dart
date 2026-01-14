@@ -1,232 +1,265 @@
 import 'package:flutter/material.dart';
-import '../models/zone.dart';
-import '../models/service.dart';
-import 'timer_page.dart';
-import 'commonappbar.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 class ServicePage extends StatefulWidget {
-  final Zone zone;
+  final String zoneId;   // 知道是哪個區域 (例如 zone_01)
+  final String zoneName; // 知道區域名字 (例如 客廳)
 
-  const ServicePage({super.key, required this.zone});
+  const ServicePage({super.key, required this.zoneId, required this.zoneName});
 
   @override
   State<ServicePage> createState() => _ServicePageState();
 }
 
 class _ServicePageState extends State<ServicePage> {
-  final List<Service> services = [];
+  late DatabaseReference _devicesRef; // 改叫 devicesRef 比較貼切
 
-  // 教學專用彈窗
-  void _showTutorialDialog({required String title, required String content}) {
+  @override
+  void initState() {
+    super.initState();
+    // ★★★ 關鍵修改：路徑變成 'zones/區域ID/devices' ★★★
+    _devicesRef = FirebaseDatabase.instance.ref('zones/${widget.zoneId}/devices');
+  }
+
+  // 輔助函式：時間格式化
+  String _formatDateTime(DateTime dt) {
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  // 新增裝置
+  void addDevice() {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController idController = TextEditingController();
+
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(content),
+      builder: (context) => AlertDialog(
+        title: const Text('新增裝置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameController, decoration: const InputDecoration(labelText: '裝置名稱', hintText: '例如：吸頂燈')),
+            TextField(controller: idController, decoration: const InputDecoration(labelText: '自訂 ID', hintText: '例如：light_01')),
+          ],
+        ),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("我知道了", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            onPressed: () {
+              if (nameController.text.isNotEmpty && idController.text.isNotEmpty) {
+                // 寫入到該區域底下
+                _devicesRef.child(idController.text.trim()).set({
+                  'name': nameController.text.trim(),
+                  'is_active': false,
+                  'timer_start': "",
+                  'timer_end': "",
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('新增'),
           ),
         ],
       ),
     );
   }
 
-  void addService() {
-    final TextEditingController controller = TextEditingController();
+  // 時間選擇器
+  Future<String?> _pickDateTime() async {
+    final DateTime? date = await showDatePicker(
+      context: context, initialDate: DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime(2030),
+    );
+    if (date == null) return null;
+    
+    if (!mounted) return null;
+    final TimeOfDay? time = await showTimePicker(
+      context: context, initialTime: TimeOfDay.now(),
+    );
+    if (time == null) return null;
+
+    final DateTime fullDateTime = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    return _formatDateTime(fullDateTime);
+  }
+
+  // 排程設定彈窗
+  void _showScheduleDialog(String id, String currentStart, String currentEnd) {
+    String tempStart = currentStart;
+    String tempEnd = currentEnd;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        title: const Text('新增裝置', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          cursorColor: Colors.black,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '裝置名稱（例如：電燈）',
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.black)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消', style: TextStyle(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) {
-                setState(() {
-                  services.add(
-                    Service(
-                      id: DateTime.now().millisecondsSinceEpoch.toString(),
-                      name: name,
-                    ),
-                  );
-                });
-                Navigator.pop(context); // 關閉輸入對話框
-
-                // --- 教學指引：裝置建立成功 ---
-                _showTutorialDialog(
-                  title: "裝置已新增！",
-                  content: "現在請「點擊清單中的 $name」來為它設定定時器 (Timer)。",
-                );
-              }
-            },
-            child: const Text('新增', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('設定排程'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    title: const Text("開始時間"),
+                    subtitle: Text(tempStart.isEmpty ? "未設定" : tempStart),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      String? res = await _pickDateTime();
+                      if (res != null) setStateDialog(() => tempStart = res);
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    title: const Text("結束時間"),
+                    subtitle: Text(tempEnd.isEmpty ? "未設定" : tempEnd),
+                    trailing: const Icon(Icons.event_busy),
+                    onTap: () async {
+                      String? res = await _pickDateTime();
+                      if (res != null) setStateDialog(() => tempEnd = res);
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    _devicesRef.child(id).update({'timer_start': "", 'timer_end': ""});
+                    Navigator.pop(context);
+                  },
+                  child: const Text('清除', style: TextStyle(color: Colors.red)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    if (tempStart.isEmpty || tempEnd.isEmpty) return;
+                    if (tempEnd.compareTo(tempStart) <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('結束時間必須晚於開始時間')));
+                      return;
+                    }
+                    _devicesRef.child(id).update({'timer_start': tempStart, 'timer_end': tempEnd});
+                    Navigator.pop(context);
+                  },
+                  child: const Text('儲存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.zoneName), // 顯示 "客廳"
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 0,
+      ),
       backgroundColor: Colors.white,
-      // 顯示返回鍵，以便回到 ZonePage
-      appBar: const CommonAppBar(showBackButton: true),
-      body: Stack(
-        children: [
-          // 使用 Column 垂直排列標題與清單，解決重疊問題
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 區域名稱標題
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${widget.zone.name} Service List',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                    
-                  ],
-                ),
-              ),
-              
-              // 使用 Expanded 讓 ListView 佔滿剩下的空間
-              Expanded(
-                child: services.isEmpty
-                    ? _buildEmptyState()
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
-                        itemCount: services.length,
-                        physics: const BouncingScrollPhysics(),
-                        itemBuilder: (context, index) {
-                          final service = services[index];
-                          return _buildServiceItem(service, index);
-                        },
-                      ),
-              ),
-            ],
-          ),
-          
-          // 懸浮按鈕固定在右下角
-          Positioned(
-            bottom: 30,
-            right: 24,
-            child: FloatingActionButton.extended(
-              elevation: 4,
-              backgroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              onPressed: addService,
-              label: const Text('新增裝置', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              icon: const Icon(Icons.add, color: Colors.white),
-            ),
-          ),
-        ],
+      body: StreamBuilder(
+        stream: _devicesRef.onValue,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return const Center(child: Text("連線錯誤"));
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+
+          List<Map<String, dynamic>> deviceList = [];
+          if (snapshot.hasData && snapshot.data!.snapshot.value != null) {
+            final rawData = snapshot.data!.snapshot.value as Map<dynamic, dynamic>;
+            rawData.forEach((key, value) {
+              final device = Map<String, dynamic>.from(value);
+              device['id'] = key;
+              deviceList.add(device);
+            });
+          }
+
+          if (deviceList.isEmpty) return const Center(child: Text("此區域尚無裝置"));
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: deviceList.length,
+            itemBuilder: (context, index) => _buildDeviceCard(deviceList[index]),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: addDevice,
+        label: const Text('新增裝置'),
+        icon: const Icon(Icons.add),
+        backgroundColor: Colors.white,
       ),
     );
   }
 
-  // 封裝每一個 Service 的卡片
-  Widget _buildServiceItem(Service service, int index) {
+  // 裝置卡片 UI (跟之前一模一樣)
+  Widget _buildDeviceCard(Map<String, dynamic> device) {
+    String name = device['name'] ?? '未命名';
+    bool isActive = device['is_active'] ?? false;
+    String id = device['id'];
+    String start = device['timer_start'] ?? "";
+    String end = device['timer_end'] ?? "";
+    bool hasSchedule = start.isNotEmpty || end.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
       child: Dismissible(
-        key: Key(service.id),
+        key: Key(id),
         direction: DismissDirection.endToStart,
-        background: Container(
-          decoration: BoxDecoration(
-            color: Colors.redAccent.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: const Icon(Icons.delete_outline, color: Colors.redAccent),
+        confirmDismiss: (d) async => await showDialog(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: Text('刪除 $name?'), content: const Text('確定移除嗎？'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("取消")),
+              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text("刪除", style: TextStyle(color: Colors.red))),
+            ],
+          )
         ),
-        onDismissed: (_) {
-          setState(() => services.removeAt(index));
-        },
+        onDismissed: (_) => _devicesRef.child(id).remove(),
+        background: Container(
+          color: Colors.red[100], alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20),
+          child: const Icon(Icons.delete, color: Colors.red),
+        ),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.black12, width: 1),
+            color: Colors.white, borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey.shade200),
+            boxShadow: isActive ? [BoxShadow(color: Colors.yellow.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 4))] : [],
           ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            leading: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.settings_remote_rounded, color: Colors.black),
-            ),
-            title: Text(
-              service.name,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            subtitle: const Text('點擊設定定時任務', style: TextStyle(fontSize: 12, color: Colors.black26)),
-            trailing: const Icon(Icons.timer_outlined, color: Colors.black12, size: 20),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => TimerPage(
-                    zone: widget.zone,
-                    service: service,
-                  ),
+          child: Column(
+            children: [
+              ListTile(
+                leading: Icon(Icons.power, color: isActive ? Colors.orange : Colors.grey),
+                title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(isActive ? "開啟中" : "已關閉"),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.date_range, color: hasSchedule ? Colors.blue : Colors.grey[300]),
+                      onPressed: () => _showScheduleDialog(id, start, end),
+                    ),
+                    Switch(
+                      value: isActive,
+                      activeColor: Colors.black,
+                      onChanged: (val) => _devicesRef.child(id).update({'is_active': val}),
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+              if (hasSchedule)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Column(
+                    children: [
+                      Divider(color: Colors.grey[100]),
+                      Row(children: [const Icon(Icons.play_circle, size: 14, color: Colors.blue), const SizedBox(width: 4), Text("開: $start", style: const TextStyle(fontSize: 12))]),
+                      const SizedBox(height: 4),
+                      Row(children: [const Icon(Icons.stop_circle, size: 14, color: Colors.red), const SizedBox(width: 4), Text("關: $end", style: const TextStyle(fontSize: 12))]),
+                    ],
+                  ),
+                )
+            ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: Colors.grey[50], shape: BoxShape.circle),
-            child: Icon(Icons.developer_board_off_outlined, size: 64, color: Colors.grey[200]),
-          ),
-          const SizedBox(height: 24),
-          const Text('此區域尚無裝置', style: TextStyle(color: Colors.black26, fontSize: 16)),
-          const SizedBox(height: 8),
-          const Text('點擊右下角按鈕新增設備', style: TextStyle(color: Colors.black12, fontSize: 14)),
-        ],
       ),
     );
   }
