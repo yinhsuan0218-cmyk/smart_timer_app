@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'schedule_page.dart';
+import 'commonappbar.dart';
 
 class HomePage extends StatefulWidget {
   // 1. 新增 showTutorial 參數，預設為 false
@@ -59,23 +60,18 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: false,
-        title: const Text(
-          'Smart Timer',
-          style: TextStyle(
-            color: Colors.black, 
-            fontWeight: FontWeight.bold, 
-            fontSize: 28,
-            letterSpacing: -0.5,
-          ),
-        ),
-      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+                'Home',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                  letterSpacing: 1.2,
+                ),
+              ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
             child: Text(

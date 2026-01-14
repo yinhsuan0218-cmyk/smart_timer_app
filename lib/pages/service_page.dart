@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/zone.dart';
 import '../models/service.dart';
 import 'timer_page.dart';
+import 'commonappbar.dart';
 
 class ServicePage extends StatefulWidget {
   final Zone zone;
@@ -90,86 +91,52 @@ class _ServicePageState extends State<ServicePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          '${widget.zone.name} 裝置列表',
-          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 22),
-        ),
-      ),
+      // 顯示返回鍵，以便回到 ZonePage
+      appBar: const CommonAppBar(showBackButton: true),
       body: Stack(
         children: [
-          services.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16),
-                  itemCount: services.length,
-                  physics: const BouncingScrollPhysics(),
-                  itemBuilder: (context, index) {
-                    final service = services[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: Dismissible(
-                        key: Key(service.id),
-                        direction: DismissDirection.endToStart,
-                        background: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                        ),
-                        onDismissed: (_) {
-                          setState(() => services.removeAt(index));
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: Colors.black12, width: 1),
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            leading: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.settings_remote_rounded, color: Colors.black),
-                            ),
-                            title: Text(
-                              service.name,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                            ),
-                            subtitle: const Text('點擊設定定時任務', style: TextStyle(fontSize: 12, color: Colors.black26)),
-                            trailing: const Icon(Icons.timer_outlined, color: Colors.black12, size: 20),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => TimerPage(
-                                    zone: widget.zone,
-                                    service: service,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
+          // 使用 Column 垂直排列標題與清單，解決重疊問題
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 區域名稱標題
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${widget.zone.name} Service List',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.black,
+                        letterSpacing: 1.2,
                       ),
-                    );
-                  },
+                    ),
+                    
+                  ],
                 ),
+              ),
+              
+              // 使用 Expanded 讓 ListView 佔滿剩下的空間
+              Expanded(
+                child: services.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
+                        itemCount: services.length,
+                        physics: const BouncingScrollPhysics(),
+                        itemBuilder: (context, index) {
+                          final service = services[index];
+                          return _buildServiceItem(service, index);
+                        },
+                      ),
+              ),
+            ],
+          ),
           
-          // 懸浮按鈕
+          // 懸浮按鈕固定在右下角
           Positioned(
             bottom: 30,
             right: 24,
@@ -187,6 +154,64 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 
+  // 封裝每一個 Service 的卡片
+  Widget _buildServiceItem(Service service, int index) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Dismissible(
+        key: Key(service.id),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          decoration: BoxDecoration(
+            color: Colors.redAccent.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(24),
+          ),
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: const Icon(Icons.delete_outline, color: Colors.redAccent),
+        ),
+        onDismissed: (_) {
+          setState(() => services.removeAt(index));
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.black12, width: 1),
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            leading: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.settings_remote_rounded, color: Colors.black),
+            ),
+            title: Text(
+              service.name,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            subtitle: const Text('點擊設定定時任務', style: TextStyle(fontSize: 12, color: Colors.black26)),
+            trailing: const Icon(Icons.timer_outlined, color: Colors.black12, size: 20),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TimerPage(
+                    zone: widget.zone,
+                    service: service,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -198,7 +223,7 @@ class _ServicePageState extends State<ServicePage> {
             child: Icon(Icons.developer_board_off_outlined, size: 64, color: Colors.grey[200]),
           ),
           const SizedBox(height: 24),
-          Text('此區域尚無裝置', style: TextStyle(color: Colors.black26, fontSize: 16)),
+          const Text('此區域尚無裝置', style: TextStyle(color: Colors.black26, fontSize: 16)),
           const SizedBox(height: 8),
           const Text('點擊右下角按鈕新增設備', style: TextStyle(color: Colors.black12, fontSize: 14)),
         ],

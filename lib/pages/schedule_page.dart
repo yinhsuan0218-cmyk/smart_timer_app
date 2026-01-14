@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import '../services/mqtt_service.dart';
+import 'commonappbar.dart';
 
 class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key});
@@ -64,17 +65,21 @@ class _SchedulePageState extends State<SchedulePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text('Schedule', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 24)),
-      ),
+      appBar: CommonAppBar(showBackButton: false),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('重複週期', style: TextStyle(color: Colors.black54, fontSize: 14)),
+            const Text(
+                'Weekly Schedule',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                  letterSpacing: 1.2,
+                ),
+              ),
             const SizedBox(height: 16),
             
             // 星期選擇區

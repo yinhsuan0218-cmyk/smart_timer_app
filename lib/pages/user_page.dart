@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'commonappbar.dart';
 
 class UserPage extends StatefulWidget {
   const UserPage({super.key});
@@ -66,23 +67,19 @@ class _UserPageState extends State<UserPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text('個人資訊', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        actions: [
-          // 頂部儲存按鈕
-          TextButton(
-            onPressed: _saveAndNext,
-            child: const Text('儲存', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(width: 16),
-        ],
-      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           children: [
+            const Text(
+                'User Info Setup',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                  letterSpacing: 1.2,
+                ),
+              ),
             const SizedBox(height: 30),
             
             // 0. 頭像

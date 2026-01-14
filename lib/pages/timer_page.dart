@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/zone.dart';
 import '../models/service.dart';
 import '../services/mqtt_service.dart';
+import 'commonappbar.dart';
 
 class TimerPage extends StatefulWidget {
   final Zone zone;
@@ -135,23 +136,21 @@ class _TimerPageState extends State<TimerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          '${widget.service.name} 定時設定',
-          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-      ),
+      appBar: CommonAppBar(showBackButton: false),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Text(
+                'Timer Setup',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                  letterSpacing: 1.2,
+                ),
+              ),
             const Text('設定自動運行時段', style: TextStyle(color: Colors.black38, fontSize: 14)),
             const SizedBox(height: 32),
             

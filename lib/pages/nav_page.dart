@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_page.dart';
 import 'zone_page.dart';
 import 'user_page.dart';
+import 'commonappbar.dart';
 
 class NavPage extends StatefulWidget {
   const NavPage({super.key});
@@ -72,6 +73,7 @@ class _NavPageState extends State<NavPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: CommonAppBar(showBackButton: false), // 登入頁通常不需要返回
       // 使用 IndexedStack 可以讓切換頁面時保持滾動位置，且不會重新載入
       body: IndexedStack(
         index: _selectedIndex,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'nav_page.dart';
+import 'commonappbar.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
@@ -30,6 +31,7 @@ class LoginPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: CommonAppBar(showBackButton: false),
       backgroundColor: Colors.white, // 純白底色
       body: Center(
         child: Padding(
