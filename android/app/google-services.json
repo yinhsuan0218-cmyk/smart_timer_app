@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "100780475148-6ltakkoijv53qj5a990llvnab31c6d6n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.smart_timer_app",
+            "certificate_hash": "9c284593b44b072c5f2425829dcdc1776838014b"
+          }
+        },
+        {
           "client_id": "100780475148-pn44avam7f78aa7p32ckdimds75hsffr.apps.googleusercontent.com",
           "client_type": 3
         }

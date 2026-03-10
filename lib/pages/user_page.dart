@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_page.dart'; // ★ 務必確認這裡有引入你的登入頁檔案
+import 'package:firebase_database/firebase_database.dart'; // ★ 新增這行：引入即時資料庫
 
 class UserPage extends StatefulWidget {
   const UserPage({super.key});
@@ -21,8 +22,12 @@ class _UserPageState extends State<UserPage> {
     _phoneController.text = user?.phoneNumber ?? '';
   }
 
-  void _saveAndNext() {
+  // ★ 修改後的儲存邏輯
+  Future<void> _saveAndNext() async {
     final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim(); // 順便抓取輸入框的 email
+
+    // 1. 防呆檢查
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('請填寫電話號碼以利緊急通知')),
@@ -30,6 +35,32 @@ class _UserPageState extends State<UserPage> {
       return;
     }
 
+    // 2. 寫入 Firebase Realtime Database
+    if (user != null) {
+      try {
+        // 指向這個使用者的專屬資料夾 (使用 user.uid 作為資料夾名稱)
+        final DatabaseReference userRef = FirebaseDatabase.instance.ref('users/${user!.uid}');
+        
+        // 更新資料
+        await userRef.update({
+          'name': user?.displayName ?? '未設定',
+          'email': email,
+          'phone': phone,
+          'last_updated': DateTime.now().toIso8601String(), // 順便紀錄一下更新時間
+        });
+      } catch (e) {
+        // 如果網路有問題導致儲存失敗
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('儲存失敗，請檢查網路連線：$e')),
+          );
+        }
+        return; // 失敗就不往下跑彈窗
+      }
+    }
+
+    // 3. 儲存成功後，顯示你原本設計的漂亮彈窗
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,

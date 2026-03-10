@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ★ 新增：引入 Auth
 
 class ServicePage extends StatefulWidget {
   final String zoneId;   // 知道是哪個區域 (例如 zone_01)
@@ -12,13 +13,22 @@ class ServicePage extends StatefulWidget {
 }
 
 class _ServicePageState extends State<ServicePage> {
-  late DatabaseReference _devicesRef; // 改叫 devicesRef 比較貼切
+  late DatabaseReference _devicesRef; 
+  String? uid; // ★ 新增用來存 UID
 
   @override
   void initState() {
     super.initState();
-    // ★★★ 關鍵修改：路徑變成 'zones/區域ID/devices' ★★★
-    _devicesRef = FirebaseDatabase.instance.ref('zones/${widget.zoneId}/devices');
+    // ★ 抓取目前登入使用者的 UID
+    uid = FirebaseAuth.instance.currentUser?.uid;
+
+    // ★ 關鍵修改：路徑變成 'users/你的UID/zones/區域ID/devices'
+    if (uid != null) {
+      _devicesRef = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices');
+    } else {
+      // 防呆預設
+      _devicesRef = FirebaseDatabase.instance.ref('zones/${widget.zoneId}/devices');
+    }
   }
 
   // 輔助函式：時間格式化
@@ -47,7 +57,7 @@ class _ServicePageState extends State<ServicePage> {
           TextButton(
             onPressed: () {
               if (nameController.text.isNotEmpty && idController.text.isNotEmpty) {
-                // 寫入到該區域底下
+                // 寫入到該使用者的該區域底下
                 _devicesRef.child(idController.text.trim()).set({
                   'name': nameController.text.trim(),
                   'is_active': false,
@@ -65,19 +75,42 @@ class _ServicePageState extends State<ServicePage> {
   }
 
   // 時間選擇器
+  // 時間選擇器 (加入過去時間防呆)
   Future<String?> _pickDateTime() async {
+    // 1. 選日期 (已經擋掉昨天以前的日期)
     final DateTime? date = await showDatePicker(
-      context: context, initialDate: DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime(2030),
+      context: context, 
+      initialDate: DateTime.now(), 
+      firstDate: DateTime.now(), 
+      lastDate: DateTime(2030),
     );
     if (date == null) return null;
     
+    // 2. 選時間
     if (!mounted) return null;
     final TimeOfDay? time = await showTimePicker(
-      context: context, initialTime: TimeOfDay.now(),
+      context: context, 
+      initialTime: TimeOfDay.now(),
     );
     if (time == null) return null;
 
+    // 3. 組合出完整的 DateTime
     final DateTime fullDateTime = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+
+    // ★★★ 關鍵防呆 1：檢查是否早於現在時間 ★★★
+    if (fullDateTime.isBefore(DateTime.now())) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ 無法設定過去的時間，請重新選擇！'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return null; // 擋下來，當作沒選
+    }
+
+    // 格式化回傳
     return _formatDateTime(fullDateTime);
   }
 
@@ -189,7 +222,7 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 
-  // 裝置卡片 UI (跟之前一模一樣)
+  // 裝置卡片 UI 
   Widget _buildDeviceCard(Map<String, dynamic> device) {
     String name = device['name'] ?? '未命名';
     bool isActive = device['is_active'] ?? false;

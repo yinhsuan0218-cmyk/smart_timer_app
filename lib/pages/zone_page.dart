@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ★ 確保有引入 Auth
 import 'service_page.dart';
 
 class ZonePage extends StatefulWidget {
@@ -10,7 +11,24 @@ class ZonePage extends StatefulWidget {
 }
 
 class _ZonePageState extends State<ZonePage> {
-  final DatabaseReference _zonesRef = FirebaseDatabase.instance.ref('zones');
+  // ★ 改成 late，讓我們在 initState 裡面再給它確切的路徑
+  late DatabaseReference _zonesRef;
+  String? uid;
+
+  @override
+  void initState() {
+    super.initState();
+    // ★ 抓取現在登入使用者的 UID
+    uid = FirebaseAuth.instance.currentUser?.uid;
+    
+    // ★ 設定專屬路徑：如果抓得到 UID，就存到他專屬的資料夾
+    if (uid != null) {
+      _zonesRef = FirebaseDatabase.instance.ref('users/$uid/zones');
+    } else {
+      // 防呆：萬一沒登入狀態，先給個預設路徑避免報錯
+      _zonesRef = FirebaseDatabase.instance.ref('zones');
+    }
+  }
 
   // 新增區域
   void addZone() {
@@ -79,7 +97,6 @@ class _ZonePageState extends State<ZonePage> {
                       return const Center(child: Text("還沒有建立區域，按右下角新增"));
                     }
 
-                    // ★★★ 改成 ListView，跟裝置列表一樣 ★★★
                     return ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                       itemCount: zoneList.length,
@@ -108,7 +125,7 @@ class _ZonePageState extends State<ZonePage> {
     );
   }
 
-  // ★★★ 長條形的區域卡片 (包含滑動刪除功能) ★★★
+  // 長條形的區域卡片
   Widget _buildZoneItem(Map<String, dynamic> zone) {
     String name = zone['name'] ?? '未命名';
     String id = zone['id'];
@@ -118,7 +135,6 @@ class _ZonePageState extends State<ZonePage> {
       child: Dismissible(
         key: Key(id),
         direction: DismissDirection.endToStart,
-        // 刪除確認
         confirmDismiss: (direction) async {
           return await showDialog(
             context: context,
@@ -156,14 +172,12 @@ class _ZonePageState extends State<ZonePage> {
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Colors.grey.shade200),
-              // 稍微加一點陰影讓它浮起來
               boxShadow: [
                 BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
               ],
             ),
             child: ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              // 左側圖示：區域 icon
               leading: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -172,13 +186,11 @@ class _ZonePageState extends State<ZonePage> {
                 ),
                 child: const Icon(Icons.meeting_room_outlined, color: Colors.black87),
               ),
-              // 中間標題
               title: Text(
                 name, 
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)
               ),
               subtitle: const Text("點擊管理裝置", style: TextStyle(fontSize: 12, color: Colors.grey)),
-              // 右側箭頭
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
             ),
           ),

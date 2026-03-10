@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart'; // 務必確認有這行
 import 'schedule_page.dart';
 import 'commonappbar.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ★ 務必加上這行
 
 class HomePage extends StatefulWidget {
   final bool showTutorial;
@@ -14,12 +15,25 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   String filter = '全部';
 
-  // 【修正 1】將原本的 _devicesRef 改為 _zonesRef，因為你的資料在 zones 節點下
-  final DatabaseReference _zonesRef = FirebaseDatabase.instance.ref('zones');
+  // 改成 late 變數
+  late DatabaseReference _zonesRef;
+  String? uid;
 
   @override
   void initState() {
     super.initState();
+    
+    // ★ 1. 抓取目前登入使用者的 UID
+    uid = FirebaseAuth.instance.currentUser?.uid;
+
+    // ★ 2. 設定專屬路徑
+    if (uid != null) {
+      _zonesRef = FirebaseDatabase.instance.ref('users/$uid/zones');
+    } else {
+      _zonesRef = FirebaseDatabase.instance.ref('zones'); // 防呆預設
+    }
+
+    // 原本的教學彈窗邏輯保留
     if (widget.showTutorial) {
       Future.delayed(const Duration(seconds: 1), _showCompletionDialog);
     }
@@ -62,6 +76,42 @@ class _HomePageState extends State<HomePage> {
         'is_active': !currentStatus,
       });
     }
+
+  // ★ 更聰明的排程文字翻譯機
+  String _getScheduleText(Map<String, dynamic> dev) {
+    final days = dev['schedule_days'] as List<dynamic>?;
+    final start = dev['timer_start'] as String?;
+    final end = dev['timer_end'] as String?;
+
+    if (days == null || start == null || end == null || start.isEmpty || end.isEmpty) {
+      return '尚未設定排程';
+    }
+
+    const dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+    List<String> activeDays = [];
+    
+    for (int i = 0; i < days.length; i++) {
+      if (days[i] == true) activeDays.add(dayLabels[i]);
+    }
+
+    if (activeDays.isEmpty) return '尚未設定排程';
+
+    String daysStr;
+    // 聰明判斷邏輯
+    if (activeDays.length == 7) {
+      daysStr = '每天';
+    } else if (activeDays.length == 5 && !days[5] && !days[6]) {
+      // 只有一到五打勾，六日沒勾
+      daysStr = '平日';
+    } else if (activeDays.length == 2 && days[5] && days[6]) {
+      // 只有六日打勾
+      daysStr = '週末';
+    } else {
+      daysStr = '每週${activeDays.join('、')}';
+    }
+
+    return '$daysStr $start - $end';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -183,14 +233,50 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         title: Text(dev['name'] ?? '未知設備', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('${dev['zoneName']} - ${isRunning ? '運作中' : '未運作'}', 
-                                      style: TextStyle(color: isRunning ? Colors.green : Colors.black26)),
+                        // ★ 升級版的副標題：包含狀態與排程時間
+                        // ★ 升級版的副標題：防溢出設計
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${dev['zoneName']} - ${isRunning ? '運作中' : '未運作'}', 
+                              style: TextStyle(color: isRunning ? Colors.green : Colors.black26),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.schedule_rounded, size: 12, color: Colors.black54),
+                                const SizedBox(width: 4),
+                                // ★★★ 關鍵解法：用 Expanded 包住 Text，防止它撐破螢幕 ★★★
+                                Expanded( 
+                                  child: Text(
+                                    _getScheduleText(dev),
+                                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                                    overflow: TextOverflow.ellipsis, // ★ 太長就自動變成 ...
+                                    maxLines: 1, // ★ 強制只能有一行
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
                               icon: const Icon(Icons.calendar_today_rounded),
-                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SchedulePage())),
+                              onPressed: () {
+                                Navigator.push(
+                                  context, 
+                                  MaterialPageRoute(
+                                    builder: (_) => SchedulePage(
+                                      zoneId: dev['zoneId'],          // 把區域ID傳過去
+                                      deviceId: dev['id'],            // 把設備ID傳過去
+                                      deviceName: dev['name'] ?? '設備', // 把名字傳過去
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                             IconButton(
                               icon: Icon(
