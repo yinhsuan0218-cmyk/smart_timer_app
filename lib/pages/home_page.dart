@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_database/firebase_database.dart'; // 務必確認有這行
 import 'schedule_page.dart';
 import 'commonappbar.dart';
 
 class HomePage extends StatefulWidget {
-  // 1. 新增 showTutorial 參數，預設為 false
   final bool showTutorial;
   const HomePage({super.key, this.showTutorial = false});
 
@@ -14,21 +14,22 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   String filter = '全部';
 
+  // 【修正 1】將原本的 _devicesRef 改為 _zonesRef，因為你的資料在 zones 節點下
+  final DatabaseReference _zonesRef = FirebaseDatabase.instance.ref('zones');
+
   @override
   void initState() {
     super.initState();
-    // 2. 只有當 showTutorial 為 true 時，才執行彈窗邏輯
     if (widget.showTutorial) {
       Future.delayed(const Duration(seconds: 1), _showCompletionDialog);
     }
   }
 
-  // 教學完成的最後彈窗 (保持不變)
   void _showCompletionDialog() {
-    if (!context.mounted) return; // 確保 context 還在
+    if (!context.mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false, // 教學完成建議強制點擊按鈕
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
@@ -44,44 +45,45 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 模擬設備資料 (保持不變)
-  final List<Map<String, dynamic>> devices = [
-    {'name': '客廳燈光', 'status': '運作中', 'icon': Icons.lightbulb_outline_rounded},
-    {'name': '臥室風扇', 'status': '未運作', 'icon': Icons.air_rounded},
-    {'name': '廚房熱水器', 'status': '運作中', 'icon': Icons.whatshot_rounded},
-    {'name': '書房插座', 'status': '未運作', 'icon': Icons.power_rounded},
-  ];
+  // 根據後端 type 字串顯示圖示
+  IconData _getIconData(String? type) {
+    switch (type) {
+      case 'light': return Icons.lightbulb_outline_rounded;
+      case 'fan': return Icons.air_rounded;
+      case 'heater': return Icons.whatshot_rounded;
+      default: return Icons.power_rounded;
+    }
+  }
+
+  // 【修正 2】更新狀態的方法，確保使用正確的 _zonesRef
+  void _toggleDevice(String zoneId, String deviceId, bool currentStatus) {
+  // 這裡會將後端的 status 改為與目前相反的值
+      _zonesRef.child('$zoneId/devices/$deviceId').update({
+        'is_active': !currentStatus,
+      });
+    }
 
   @override
   Widget build(BuildContext context) {
-    final filteredDevices = filter == '全部'
-        ? devices
-        : devices.where((d) => d['status'] == filter).toList();
-
     return Scaffold(
       backgroundColor: Colors.white,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-                'Home',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                  letterSpacing: 1.2,
-                ),
-              ),
+          // 標題部分
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
+            padding: EdgeInsets.fromLTRB(24, 60, 24, 0),
             child: Text(
-              '管理您的智慧設備',
-              style: TextStyle(fontSize: 14, color: Colors.black45, fontWeight: FontWeight.w500),
+              'Home',
+              style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 1.2),
             ),
           ),
-          const SizedBox(height: 16),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
+            child: Text('管理您的智慧設備', style: TextStyle(fontSize: 14, color: Colors.black45)),
+          ),
 
-          // 過濾標籤 (保持不變)
+          // 篩選標籤
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -97,16 +99,9 @@ class _HomePageState extends State<HomePage> {
                       if (val) setState(() => filter = category);
                     },
                     selectedColor: Colors.black,
-                    backgroundColor: Colors.white,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(color: isSelected ? Colors.black : Colors.black12),
-                    ),
+                    labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
                     showCheckmark: false,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                 );
               }).toList(),
@@ -115,80 +110,105 @@ class _HomePageState extends State<HomePage> {
 
           const SizedBox(height: 24),
 
-          // 設備清單 (保持不變)
+          // 3. 重點：使用 StreamBuilder 取代原本的 ListView
           Expanded(
-            child: filteredDevices.isEmpty 
-              ? _buildEmptyState()
-              : ListView.builder(
+            child: StreamBuilder(
+              stream: _zonesRef.onValue, // 監聽整個 zones 節點
+              builder: (context, snapshot) {
+                if (snapshot.hasError) return const Center(child: Text("連線錯誤"));
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator(color: Colors.black));
+                }
+
+                List<Map<String, dynamic>> allDevices = [];
+
+                if (snapshot.hasData && snapshot.data!.snapshot.value != null) {
+                  // 【修正 3】解析資料時增加型別檢查，避免 runtime error
+                  final zonesData = Map<dynamic, dynamic>.from(snapshot.data!.snapshot.value as Map);
+
+                  zonesData.forEach((zoneId, zoneValue) {
+                    final zoneMap = Map<dynamic, dynamic>.from(zoneValue as Map);
+                    
+                    if (zoneMap.containsKey('devices')) {
+                      final devicesMap = Map<dynamic, dynamic>.from(zoneMap['devices'] as Map);
+                      
+                      devicesMap.forEach((deviceId, deviceValue) {
+                        final device = Map<String, dynamic>.from(deviceValue as Map);
+                        device['id'] = deviceId;
+                        device['zoneId'] = zoneId; 
+                        device['zoneName'] = zoneMap['name']; 
+
+                        // 篩選邏輯
+                        bool isRunning = device['is_active'] == true;
+                        if (filter == '全部') {
+                          allDevices.add(device);
+                        } else if (filter == '運作中' && isRunning) {
+                          allDevices.add(device);
+                        } else if (filter == '未運作' && !isRunning) {
+                          allDevices.add(device);
+                        }
+                      });
+                    }
+                  });
+                }
+
+                if (allDevices.isEmpty) return _buildEmptyState();
+
+                return ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 24),
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: filteredDevices.length,
+                  itemCount: allDevices.length,
                   itemBuilder: (context, index) {
-                    final device = filteredDevices[index];
-                    final bool isRunning = device['status'] == '運作中';
+                    final dev = allDevices[index];
+                    final bool isRunning = dev['is_active'] ?? false;
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(28),
-                        border: Border.all(color: Colors.black12, width: 1),
+                        border: Border.all(color: Colors.black12),
                       ),
                       child: ListTile(
-                        contentPadding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
                         leading: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: isRunning ? Colors.black : Colors.grey[50],
+                            // 開啟時背景變黑，關閉時接近白色
+                            color: isRunning ? Colors.black : Colors.grey[100], 
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            device['icon'], 
+                            _getIconData(dev['type']),
+                            // 開啟時圖示變白，關閉時圖示黑色
                             color: isRunning ? Colors.white : Colors.black,
-                            size: 24,
                           ),
                         ),
-                        title: Text(
-                          device['name'], 
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            device['status'], 
-                            style: TextStyle(
-                              color: isRunning ? Colors.green[700] : Colors.black26,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
+                        title: Text(dev['name'] ?? '未知設備', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('${dev['zoneName']} - ${isRunning ? '運作中' : '未運作'}', 
+                                      style: TextStyle(color: isRunning ? Colors.green : Colors.black26)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.calendar_today_rounded, size: 20),
-                              color: Colors.black54,
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => const SchedulePage()),
-                                );
-                              },
+                              icon: const Icon(Icons.calendar_today_rounded),
+                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SchedulePage())),
                             ),
                             IconButton(
                               icon: Icon(
                                 Icons.power_settings_new_rounded, 
-                                color: isRunning ? Colors.black : Colors.black12,
+                                // 當 isRunning 為 true (開啟) 時顯示黑色，false (關閉) 時顯示淺灰色
+                                color: isRunning ? Colors.black : Colors.black12, 
                                 size: 28,
                               ),
-                              onPressed: () {},
+                              onPressed: () => _toggleDevice(dev['zoneId'], dev['id'], isRunning),
                             ),
                           ],
                         ),
                       ),
                     );
                   },
-                ),
+                );
+              },
+            ),
           ),
         ],
       ),
