@@ -3,6 +3,9 @@ import '../models/zone.dart';
 import '../models/service.dart';
 import '../services/mqtt_service.dart';
 import 'commonappbar.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:convert';
 
 class TimerPage extends StatefulWidget {
   final Zone zone;
@@ -69,8 +72,7 @@ class _TimerPageState extends State<TimerPage> {
            "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
   }
 
-  // 2. 送出設定並顯示教學最後一步
-  void sendTimer() {
+  void sendTimer() async {
     if (start == null || end == null) {
       _showToast('請先設定開始與結束時間');
       return;
@@ -80,17 +82,51 @@ class _TimerPageState extends State<TimerPage> {
       return;
     }
 
-    final payload = {
-      "zone": widget.zone.name,
-      "service": widget.service.name,
-      "start": formatDateTime(start),
-      "end": formatDateTime(end),
-    };
+    // ★★★ 核心邏輯：判定現在是否在排程時段內 ★★★
+    final now = DateTime.now();
+    // 如果「現在時間」在「開始」之後，且在「結束」之前
+    bool shouldBeActiveNow = now.isAfter(start!) && now.isBefore(end!);
 
-    // 執行發送
-    MqttService().publish('smart_timer/timer', payload.toString());
-    
-    // --- 首次登入教學：最後一步 ---
+    final startStr = formatDateTime(start);
+    final endStr = formatDateTime(end);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      // 1. 取得 Firebase 參照 
+      // 注意：這裡假設 widget.service 有 id 屬性。如果沒有，請根據你的 model 調整
+      final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zone.id}/devices/${widget.service.id}');
+
+      // 2. 更新 Firebase：同步寫入 timer 和 is_active
+      await ref.update({
+        'timer_start': startStr,
+        'timer_end': endStr,
+        'is_active': shouldBeActiveNow, // ★ 同步狀態
+        'schedule_days': null,          // ★ 確保清除掉週期性排程，改為一次性計時
+        'last_updated': DateTime.now().toIso8601String(),
+      });
+
+      // 3. 執行 MQTT 發送（發送給硬體）
+      final payload = {
+        "device_id": widget.service.id,
+        "start": startStr,
+        "end": endStr,
+        "is_active": shouldBeActiveNow,
+      };
+      MqttService().publish('smart_timer/timer', jsonEncode(payload));
+      
+      // 4. 教學彈窗 (保持你原本的代碼)
+      if (!mounted) return;
+      _showSuccessDialog();
+
+    } catch (e) {
+      _showToast('設定失敗：$e');
+    }
+  }
+
+  // 將彈窗邏輯抽離，保持 sendTimer 整潔
+  void _showSuccessDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -105,14 +141,14 @@ class _TimerPageState extends State<TimerPage> {
           ],
         ),
         content: const Text(
-          '您的排程已送出。教學最後一步：請點擊下方導覽列中間的「Home」回到首頁，確認裝置的運行狀態。',
+          '您的單次排程已送出。教學最後一步：請點擊下方導覽列中間的「Home」回到首頁，確認裝置的運行狀態。',
           style: TextStyle(height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(ctx); // 關閉彈窗
-              Navigator.pop(context); // 回到 Service 頁面 (或直接連退回到 NavPage)
+              Navigator.pop(ctx); 
+              Navigator.pop(context); 
             },
             child: const Text('完成教學', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
