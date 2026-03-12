@@ -39,6 +39,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   mqtt_client: ^10.2.0
   firebase_database: ^12.1.1
+  shared_preferences: ^2.5.4
 
 
 dev_dependencies:

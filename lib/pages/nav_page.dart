@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 1. 引入套件
 import 'home_page.dart';
 import 'zone_page.dart';
 import 'user_page.dart';
@@ -12,14 +13,29 @@ class NavPage extends StatefulWidget {
 }
 
 class _NavPageState extends State<NavPage> {
-  int _selectedIndex = 1; 
-  int _tutorialStep = 0; // 0: 未開始, 1: 提醒去 UserPage, 2: 提醒去 ZonePage...
+  int _selectedIndex = 1;
+  int _tutorialStep = 0;
 
   @override
   void initState() {
     super.initState();
-    // 延遲 1 秒後顯示歡迎畫面與 Step 1
-    Future.delayed(const Duration(seconds: 1), () => _showStep1());
+    // 2. 改為呼叫檢查邏輯
+    _checkFirstTime();
+  }
+
+  // ★★★ 核心邏輯：檢查是否為第一次進入 ★★★
+  Future<void> _checkFirstTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    // 嘗試讀取 'hasSeenTutorial'，若無此 key 則回傳 null (代表第一次)
+    bool hasSeenTutorial = prefs.getBool('hasSeenTutorial') ?? false;
+
+    if (!hasSeenTutorial) {
+      // 如果沒看過，延遲 1 秒顯示 Step 1
+      Future.delayed(const Duration(seconds: 1), () => _showStep1());
+      
+      // 同時將標記設為 true，下次進來就不會顯示了
+      await prefs.setBool('hasSeenTutorial', true);
+    }
   }
 
   // Step 1: 歡迎與指引前往 UserPage
@@ -29,8 +45,8 @@ class _NavPageState extends State<NavPage> {
       content: "為了安全，請先前往「User」分頁填寫您的電話號碼。",
       buttonText: "前往 User 頁面",
       onConfirm: () {
-        setState(() => _selectedIndex = 2); // 跳轉到 UserPage
-        _tutorialStep = 2; // 下一個邏輯在 UserPage 完成時觸發
+        setState(() => _selectedIndex = 2);
+        _tutorialStep = 2;
       },
     );
   }
