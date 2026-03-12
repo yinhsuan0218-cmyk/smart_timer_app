@@ -98,12 +98,12 @@ class _SchedulePageState extends State<SchedulePage> {
   }
 
   void sendSchedule() async {
+    // 1. 基本防呆
     if (!days.contains(true)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請至少選擇一天')));
       return;
     }
 
-    // 防呆：結束時間必須大於開始時間
     final int startMinutes = start.hour * 60 + start.minute;
     final int endMinutes = end.hour * 60 + end.minute;
     if (endMinutes <= startMinutes) {
@@ -111,56 +111,142 @@ class _SchedulePageState extends State<SchedulePage> {
       return; 
     }
 
+    // 2. 格式化時間
     final startStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
     final endStr = "${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}";
 
-    // 寫入 Firebase
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
+    setState(() => isLoading = true);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) throw Exception("使用者未登入");
+
+      // 3. 執行 Firebase 寫入
       final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
+      
+      // 注意：使用 await 確保 Firebase 寫入完成
       await ref.update({
         'timer_start': startStr,
         'timer_end': endStr,
-        'schedule_days': days, 
+        'schedule_days': days,
+        'last_updated': DateTime.now().toIso8601String(),
       });
-    }
 
-    // 發送 MQTT
-    final schedule = {
-      "device_id": widget.deviceId,
-      "days": days,
-      "start": startStr,
-      "end": endStr,
-    };
-    MqttService().publish('smart_timer/schedule', jsonEncode(schedule));
-    
-    // ★★★ 核心修改：漂亮的設定完成彈窗 ★★★
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false, // 必須按鈕才能關閉
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
-            SizedBox(width: 8),
-            Text('排程已儲存', style: TextStyle(fontWeight: FontWeight.bold)),
+      // 4. 發送 MQTT (放入另一個 try 區塊，避免 MQTT 失敗影響到 UI 回饋)
+      try {
+        final schedule = {
+          "device_id": widget.deviceId,
+          "days": days,
+          "start": startStr,
+          "end": endStr,
+        };
+        MqttService().publish('smart_timer/schedule', jsonEncode(schedule));
+      } catch (mqttError) {
+        debugPrint("MQTT 發送失敗（硬體可能暫時無法接收），但雲端已儲存: $mqttError");
+        // 這裡可以選擇不報錯，因為雲端已經存好了
+      }
+
+      // 5. 顯示成功彈窗
+      if (!mounted) return;
+      
+      // 先關閉讀取狀態
+      setState(() => isLoading = false);
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+              SizedBox(width: 8),
+              Text('設定成功', style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Text('${widget.deviceName} 的排程已更新並同步至雲端。'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);     // 關閉彈窗
+                Navigator.pop(context); // 回到首頁
+              },
+              child: const Text('我知道了', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
           ],
         ),
-        content: Text('${widget.deviceName} 的每週循環排程已成功更新並派發至設備。'),
+      );
+
+    } catch (e) {
+      // 只有當 Firebase 寫入真的報錯時才會跑到這裡
+      debugPrint("Firebase 儲存真正失敗: $e");
+      if (mounted) {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('儲存失敗，請檢查網路連線: $e')),
+        );
+      }
+    }
+  }
+
+  // ★★★ 新增：帶有確認對話框的取消功能 ★★★
+  void cancelSchedule() async {
+    // 顯示確認對話框
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('確定取消排程？'),
+        content: const Text('這將會移除本設備所有的每週循環任務。'),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('先不要')),
           TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);     // 1. 關閉這個彈窗
-              Navigator.pop(context); // 2. 退回上一頁 (首頁)
-            },
-            child: const Text('確定', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16)),
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text('確定取消', style: TextStyle(color: Colors.redAccent))
           ),
         ],
       ),
     );
+
+    if (confirm != true) return;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => isLoading = true); // 顯示讀取中
+
+    try {
+      // 1. 更新 UI 狀態
+      setState(() {
+        days = List.generate(7, (_) => false);
+      });
+
+      // 2. 更新 Firebase
+      final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
+      await ref.update({
+        'schedule_days': days,
+        'last_updated': DateTime.now().toIso8601String(),
+      });
+
+      // 3. 發送 MQTT 告知 ESP32
+      final schedule = {
+        "device_id": widget.deviceId,
+        "days": days,
+        "start": "",
+        "end": "",
+        "action": "cancel"
+      };
+      MqttService().publish('smart_timer/schedule', jsonEncode(schedule));
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('所有排程已取消'), backgroundColor: Colors.black)
+      );
+    } catch (e) {
+      debugPrint("取消排程失敗: $e");
+    } finally {
+      setState(() => isLoading = false);
+    }
   }
 
   @override
@@ -254,6 +340,15 @@ class _SchedulePageState extends State<SchedulePage> {
                   elevation: 0,
                 ),
                 child: const Text('確認排程', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: cancelSchedule,
+                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                child: const Text('取消並關閉所有排程', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
