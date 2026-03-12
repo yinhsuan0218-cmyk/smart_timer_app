@@ -92,8 +92,49 @@ class LoginPage extends StatelessWidget {
               
               const SizedBox(height: 24),
               // 底部裝飾線條或文字
+              // 底部裝飾線條或文字
               TextButton(
-                onPressed: () {},
+                onPressed: () {
+                  // 彈出宗旨小視窗
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      backgroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                      title: const Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Colors.black),
+                          SizedBox(width: 10),
+                          Text('軟體宗旨', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      content: const Column(
+                        mainAxisSize: MainAxisSize.min, // 讓視窗長度隨內容縮放
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Smart Timer 致力於簡化您的家居自動化體驗。',
+                            style: TextStyle(fontWeight: FontWeight.bold, height: 1.5),
+                          ),
+                          SizedBox(height: 12),
+                          Text(
+                            '我們透過直覺的排程介面與穩定的 MQTT 技術，讓您隨時隨地精準掌控設備運作，達成節能環保與便利生活的美好願景。',
+                            style: TextStyle(color: Colors.black87, height: 1.5),
+                          ),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text(
+                            '我知道了',
+                            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
                 child: const Text(
                   '需要協助？',
                   style: TextStyle(color: Colors.black45, fontSize: 14),

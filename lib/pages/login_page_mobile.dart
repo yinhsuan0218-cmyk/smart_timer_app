@@ -124,15 +124,64 @@ class LoginPage extends StatelessWidget {
                 
                 const SizedBox(height: 30),
                 
-                // 4. 底部隱私提示 (User-friendly 的細節)
-                Text(
-                  '需要協助？',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                TextButton(
+                  onPressed: () {
+                    _showAppPurpose(context); // 呼叫下方的彈窗函式
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey[400], // 保持低調的灰色
+                  ),
+                  child: const Text(
+                    '需要協助？',
+                    style: TextStyle(fontSize: 14, decoration: TextDecoration.underline), // 加底線增加點擊暗示
+                  ),
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+  // ★ 宗旨彈窗函式 ★
+  void _showAppPurpose(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent, // 防止 Material3 自動變色
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome_outlined, color: Colors.black),
+            SizedBox(width: 10),
+            Text('軟體宗旨', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '讓生活更有條理，讓節能變簡單。',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, height: 1.5),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Smart Timer 是一款為現代智慧家居打造的排程工具。我們的宗旨是透過穩定的 MQTT 通訊與雲端同步技術，幫助使用者精確管理電器的運行時間，進而減少能源浪費並提升生活便利性。',
+              style: TextStyle(color: Colors.black87, height: 1.6),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              '開始使用',
+              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+          ),
+        ],
       ),
     );
   }
