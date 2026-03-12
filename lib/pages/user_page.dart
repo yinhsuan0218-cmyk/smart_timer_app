@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'login_page.dart'; // ★ 務必確認這裡有引入你的登入頁檔案
-import 'package:firebase_database/firebase_database.dart'; // ★ 新增這行：引入即時資料庫
+import 'package:firebase_database/firebase_database.dart';
+import 'login_page.dart';
 
 class UserPage extends StatefulWidget {
   const UserPage({super.key});
@@ -14,20 +14,48 @@ class _UserPageState extends State<UserPage> {
   final user = FirebaseAuth.instance.currentUser;
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
+  bool _isLoading = false; // 新增：讀取狀態控制
 
   @override
   void initState() {
     super.initState();
+    // 1. 先填入 Auth 的基本資料作為預設值
     _emailController.text = user?.email ?? '';
-    _phoneController.text = user?.phoneNumber ?? '';
+    
+    // 2. 觸發異步讀取資料庫
+    _loadUserData();
   }
 
-  // ★ 修改後的儲存邏輯
+  // 從 Realtime Database 讀取電話與自定義資料
+  Future<void> _loadUserData() async {
+    if (user == null) return;
+    
+    try {
+      final DatabaseReference userRef = FirebaseDatabase.instance.ref('users/${user!.uid}');
+      final snapshot = await userRef.get();
+
+      if (snapshot.exists) {
+        final data = snapshot.value as Map<dynamic, dynamic>;
+        
+        // 使用 setState 更新 UI
+        setState(() {
+          if (data.containsKey('phone')) {
+            _phoneController.text = data['phone'].toString();
+          }
+          if (data.containsKey('email')) {
+            _emailController.text = data['email'].toString();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("讀取資料庫失敗: $e");
+    }
+  }
+
   Future<void> _saveAndNext() async {
     final phone = _phoneController.text.trim();
-    final email = _emailController.text.trim(); // 順便抓取輸入框的 email
+    final email = _emailController.text.trim();
 
-    // 1. 防呆檢查
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('請填寫電話號碼以利緊急通知')),
@@ -35,32 +63,34 @@ class _UserPageState extends State<UserPage> {
       return;
     }
 
-    // 2. 寫入 Firebase Realtime Database
+    setState(() => _isLoading = true); // 開始儲存，進入讀取狀態
+
     if (user != null) {
       try {
-        // 指向這個使用者的專屬資料夾 (使用 user.uid 作為資料夾名稱)
         final DatabaseReference userRef = FirebaseDatabase.instance.ref('users/${user!.uid}');
         
-        // 更新資料
         await userRef.update({
           'name': user?.displayName ?? '未設定',
           'email': email,
           'phone': phone,
-          'last_updated': DateTime.now().toIso8601String(), // 順便紀錄一下更新時間
+          'last_updated': DateTime.now().toIso8601String(),
         });
+
+        if (!mounted) return;
+        _showSuccessDialog(); // 獨立出彈窗方法
       } catch (e) {
-        // 如果網路有問題導致儲存失敗
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('儲存失敗，請檢查網路連線：$e')),
+            SnackBar(content: Text('儲存失敗：$e')),
           );
         }
-        return; // 失敗就不往下跑彈窗
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
       }
     }
+  }
 
-    // 3. 儲存成功後，顯示你原本設計的漂亮彈窗
-    if (!mounted) return;
+  void _showSuccessDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -79,7 +109,6 @@ class _UserPageState extends State<UserPage> {
     );
   }
 
-  // ★ 修正後的登出對話框：改用直接跳轉（不依賴 main.dart 路由）
   void _showSignOutDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -97,7 +126,6 @@ class _UserPageState extends State<UserPage> {
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
               if (context.mounted) {
-                // 直接導航到 LoginPage 並清空所有頁面
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (context) => const LoginPage()), 
@@ -134,21 +162,13 @@ class _UserPageState extends State<UserPage> {
             ),
             const SizedBox(height: 30),
             
-            // 頭像
+            // 頭像部分
             Center(
               child: CircleAvatar(
                 radius: 55,
-                backgroundColor: Colors.grey[200], // 底色
-                // 使用 foregroundImage 載入網路圖片，如果載入失敗會顯示 child
-                foregroundImage: (user?.photoURL != null) 
-                    ? NetworkImage(user!.photoURL!) 
-                    : null,
-                // 這是當圖片還沒載入或不存在時，顯示的預設圖示
-                child: const Icon(
-                  Icons.person, 
-                  size: 55, 
-                  color: Colors.grey,
-                ),
+                backgroundColor: Colors.grey[200],
+                foregroundImage: (user?.photoURL != null) ? NetworkImage(user!.photoURL!) : null,
+                child: const Icon(Icons.person, size: 55, color: Colors.grey),
               ),
             ),
             const SizedBox(height: 40),
@@ -160,18 +180,20 @@ class _UserPageState extends State<UserPage> {
             _buildEditField(label: '電話號碼', controller: _phoneController, icon: Icons.phone_android_rounded, keyboardType: TextInputType.phone),
             const SizedBox(height: 40),
 
-            // 更新按鈕
+            // 更新按鈕 (增加 Loading 判斷)
             SizedBox(
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: _saveAndNext,
+                onPressed: _isLoading ? null : _saveAndNext,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.black,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                 ),
-                child: const Text('更新並繼續', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                child: _isLoading 
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : const Text('更新並繼續', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ),
             ),
             const SizedBox(height: 20),
@@ -198,7 +220,7 @@ class _UserPageState extends State<UserPage> {
     );
   }
 
-  // 小組件定義 (InfoField & EditField)
+  // --- UI 小組件 ---
   Widget _buildInfoField({required String label, required String content, required IconData icon}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,6 +228,7 @@ class _UserPageState extends State<UserPage> {
         Text(label, style: const TextStyle(fontSize: 14, color: Colors.black54)),
         const SizedBox(height: 8),
         Container(
+          width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.black12)),
           child: Row(children: [Icon(icon, size: 20, color: Colors.black38), const SizedBox(width: 12), Text(content, style: const TextStyle(color: Colors.black45))]),
