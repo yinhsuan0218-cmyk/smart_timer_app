@@ -1,30 +1,29 @@
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'dart:math';
+import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart'; // ★ 新增：為了更新 Firebase
+import 'package:firebase_database/firebase_database.dart'; // ★ 新增：為了更新 Firebase
 
 class MqttService {
-  // 單例模式：確保整個 App 共用同一個 MQTT 連線
   static final MqttService _instance = MqttService._internal();
   factory MqttService() => _instance;
   MqttService._internal();
 
   MqttServerClient? client;
 
-  // 初始化並連線到 Broker
   Future<void> connect() async {
     String clientId = 'smart_timer_app_${Random().nextInt(100000)}';
     
-    // ★ 1. 回歸最純粹的 HiveMQ TCP 連線 (不需要 ws://)
     client = MqttServerClient('broker.hivemq.com', clientId);
     client!.port = 1883;
-    client!.useWebSocket = false; // 關閉 WebSocket
-    client!.logging(on: true);    // ★ 打開 Log，看清楚連線過程
+    client!.useWebSocket = false; 
+    client!.logging(on: false); // 關閉底層 log 保持終端機乾淨
     client!.keepAlivePeriod = 20;
 
-    // ★ 2. 移除有毒的遺言設定，給它一個最乾淨的連線封包
     final connMess = MqttConnectMessage()
         .withClientIdentifier(clientId)
-        .startClean(); // 每次連線都當作全新的開始
+        .startClean(); 
         
     client!.connectionMessage = connMess;
 
@@ -39,17 +38,64 @@ class MqttService {
     if (client!.connectionStatus != null && 
         client!.connectionStatus!.state == MqttConnectionState.connected) {
       print('✅ MQTT 連線成功！Broker: broker.hivemq.com');
+      
+      // ★★★ 新增：裝上耳朵！訂閱硬體狀態頻道 ★★★
+      _subscribeToHardwareStatus();
+
     } else {
       print('❌ MQTT 連線失敗，狀態: ${client!.connectionStatus?.state}');
       client!.disconnect();
     }
   }
 
-  // 發布訊息的功能 (也就是你 schedule_page 呼叫的那個)
+  // ★ 監聽硬體回報的專屬函式
+  void _subscribeToHardwareStatus() {
+    const statusTopic = 'smart_timer/status';
+    client!.subscribe(statusTopic, MqttQos.atLeastOnce);
+    print('👂 開始監聽硬體狀態頻道: $statusTopic');
+
+    // 只要有訊息進來，就會觸發這個 listen
+    client!.updates!.listen((List<MqttReceivedMessage<MqttMessage>> c) {
+      final recMess = c[0].payload as MqttPublishMessage;
+      final payload = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
+      
+      print('📥 [收到硬體回報] 頻道: ${c[0].topic} | 內容: $payload');
+
+      if (c[0].topic == statusTopic) {
+        _handleHardwareStatusUpdate(payload);
+      }
+    });
+  }
+
+  // ★ 處理硬體傳來的 JSON，並同步到 Firebase
+  Future<void> _handleHardwareStatusUpdate(String payload) async {
+    try {
+      final data = jsonDecode(payload);
+      final deviceId = data['device_id'];
+      final zoneId = data['zone_id'];
+      final isActive = data['is_active'];
+
+      if (deviceId != null && zoneId != null && isActive != null) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid == null) return;
+
+        // 直接更新 Firebase，App 畫面就會因為 StreamBuilder 自動更新！
+        final ref = FirebaseDatabase.instance.ref('users/$uid/zones/$zoneId/devices/$deviceId');
+        await ref.update({
+          'is_active': isActive,
+        });
+        print('🔄 已成功將硬體狀態同步至 Firebase！ (設備: $deviceId, 狀態: $isActive)');
+      } else {
+        print('⚠️ 硬體回報的 JSON 格式缺少必要欄位');
+      }
+    } catch (e) {
+      print('❌ 解析硬體回報失敗: $e');
+    }
+  }
+
   void publish(String topic, String message) {
-    // 如果還沒連線，就先自動連線再發送
     if (client == null || client!.connectionStatus!.state != MqttConnectionState.connected) {
-      print('⚠️ MQTT 尚未連線，正在嘗試重新連線並發送...');
+      print('⚠️ MQTT 尚未連線，嘗試重新連線...');
       connect().then((_) {
         if (client!.connectionStatus!.state == MqttConnectionState.connected) {
           _publishMessage(topic, message);
@@ -57,18 +103,13 @@ class MqttService {
       });
       return;
     }
-    
-    // 已經連線就直接發送
     _publishMessage(topic, message);
   }
 
-  // 實際執行發送的內部方法
   void _publishMessage(String topic, String message) {
     final builder = MqttClientPayloadBuilder();
     builder.addString(message);
     client!.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
-    print('📤 已成功發布 MQTT 訊息！');
-    print('📍 頻道 (Topic): $topic');
-    print('📜 內容 (Message): $message');
+    print('📤 [發送指令] 頻道: $topic | 內容: $message');
   }
 }

@@ -59,84 +59,83 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 1. 判斷是否在排程時段內
+  // ★ 升級版：精準判斷現在是否在排程時段內
   bool _isDeviceInSchedule(Map<String, dynamic> dev) {
-    // ★ 統一使用 timer_start 和 timer_end
-    final startFull = dev['timer_start'] as String?;
-    final endFull = dev['timer_end'] as String?;
+    final mode = dev['schedule_mode'] as String?;
+    final startStr = dev['timer_start'] as String?;
+    final endStr = dev['timer_end'] as String?;
 
-    if (startFull == null || endFull == null || startFull.isEmpty) return false;
+    if (startStr == null || endStr == null || startStr.isEmpty || endStr.isEmpty) return false;
 
     try {
-      // 嘗試解析 "2026-03-12 18:30" 格式
-      DateTime startTime = DateTime.parse(startFull.replaceFirst(' ', 'T'));
-      DateTime endTime = DateTime.parse(endFull.replaceFirst(' ', 'T'));
-      DateTime now = DateTime.now();
+      final now = DateTime.now();
+      final nowMinutes = now.hour * 60 + now.minute;
+      
+      final s = startStr.split(':');
+      final e = endStr.split(':');
+      final startMinutes = int.parse(s[0]) * 60 + int.parse(s[1]);
+      final endMinutes = int.parse(e[0]) * 60 + int.parse(e[1]);
 
-      return now.isAfter(startTime) && now.isBefore(endTime);
+      // 1. 先確認「時間」有沒有中
+      bool isTimeMatch = nowMinutes >= startMinutes && nowMinutes < endMinutes;
+      if (!isTimeMatch) return false;
+
+      // 2. 再確認「日期」有沒有中
+      if (mode == 'once') {
+        final dateStr = dev['schedule_date'] as String?;
+        if (dateStr == null) return false;
+        final scheduleDate = DateTime.parse(dateStr);
+        // 單次排程：比對年月日是否為今天
+        return now.year == scheduleDate.year && 
+               now.month == scheduleDate.month && 
+               now.day == scheduleDate.day;
+      } else {
+        // 循環排程：比對星期幾
+        final days = dev['schedule_days'] as List<dynamic>?;
+        if (days == null || days.length < 7) return false;
+        return days[now.weekday - 1] == true;
+      }
     } catch (e) {
-      // 如果解析失敗（例如只有 "18:30"），則走週期性判定
-      return _isPeriodicScheduleActive(dev); 
+      return false; // 解析出錯就當作不在排程內
     }
   }
 
-  // 2. 顯示排程文字
+  // ★ 升級版：顯示排程文字 (支援單次與循環)
   String _getScheduleText(Map<String, dynamic> dev) {
-    final days = dev['schedule_days'] as List<dynamic>?;
-    // ★ 統一使用 timer_start 和 timer_end
-    final startFull = dev['timer_start'] as String?;
-    final endFull = dev['timer_end'] as String?;
+    final mode = dev['schedule_mode'] as String?;
+    final start = dev['timer_start'] as String?;
+    final end = dev['timer_end'] as String?;
 
-    if (startFull == null || endFull == null || startFull.isEmpty || endFull.isEmpty) {
+    if (start == null || end == null || start.isEmpty || end.isEmpty) {
       return '尚未設定排程';
     }
 
-    // 擷取時間部分 (從 "2026-03-12 18:30" 擷取 "18:30")
-    String start = startFull.contains(' ') ? startFull.split(' ')[1] : startFull;
-    String end = endFull.contains(' ') ? endFull.split(' ')[1] : endFull;
+    // 單次特定時間模式
+    if (mode == 'once') {
+      final date = dev['schedule_date'] as String?;
+      if (date == null) return '尚未設定排程';
+      return '單次: $date $start - $end';
+    } 
+    // 每週循環模式 (預設)
+    else {
+      final days = dev['schedule_days'] as List<dynamic>?;
+      if (days == null) return '尚未設定排程';
+      
+      const dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+      List<String> activeDays = [];
+      for (int i = 0; i < days.length && i < 7; i++) {
+        if (days[i] == true) activeDays.add(dayLabels[i]);
+      }
+      if (activeDays.isEmpty) return '$start - $end';
 
-    if (days == null) {
-       // 一次性計時顯示完整日期時間
-       return '$startFull - $endFull';
+      String daysStr;
+      if (activeDays.length == 7) daysStr = '每天';
+      else if (activeDays.length == 5 && !days[5] && !days[6]) daysStr = '平日';
+      else if (activeDays.length == 2 && days[5] && days[6]) daysStr = '週末';
+      else daysStr = '每週${activeDays.join('、')}';
+
+      return '$daysStr $start - $end';
     }
-
-    // 週期性排程邏輯 (略...)
-    const dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
-    List<String> activeDays = [];
-    for (int i = 0; i < days.length; i++) {
-      if (days[i] == true) activeDays.add(dayLabels[i]);
-    }
-    if (activeDays.isEmpty) return '$start - $end';
-
-    String daysStr;
-    if (activeDays.length == 7) daysStr = '每天';
-    else if (activeDays.length == 5 && !days[5] && !days[6]) daysStr = '平日';
-    else if (activeDays.length == 2 && days[5] && days[6]) daysStr = '週末';
-    else daysStr = '每週${activeDays.join('、')}';
-
-    return '$daysStr $start - $end';
-  }
-
-  
-
-  // 4. 補充週期性排程判定 (當格式為 HH:mm 時)
-  bool _isPeriodicScheduleActive(Map<String, dynamic> dev) {
-    final days = dev['schedule_days'] as List<dynamic>?;
-    final startStr = dev['timer_start'] as String?;
-    final endStr = dev['timer_end'] as String?;
-    if (days == null || startStr == null || endStr == null) return false;
-
-    final now = DateTime.now();
-    if (days[now.weekday - 1] != true) return false;
-
-    try {
-      final nowTime = now.hour * 60 + now.minute;
-      final s = startStr.split(':');
-      final e = endStr.split(':');
-      final startTime = int.parse(s[0]) * 60 + int.parse(s[1]);
-      final endTime = int.parse(e[0]) * 60 + int.parse(e[1]);
-      return nowTime >= startTime && nowTime < endTime;
-    } catch (e) { return false; }
   }
 
   // 根據後端 type 字串顯示圖示
@@ -166,7 +165,7 @@ class _HomePageState extends State<HomePage> {
               Text('手動操作提示', style: TextStyle(fontWeight: FontWeight.bold)),
             ],
           ),
-          content: Text('該設備目前正處於自動排程期間 (${dev['timer_start']} - ${dev['timer_end']})。\n\n手動切換將違反預設排程，確定要繼續嗎？'),
+          content: Text('該設備目前正處於自動排程期間\n(${_getScheduleText(dev)})\n\n手動切換將違反預設排程，確定要繼續嗎？'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),

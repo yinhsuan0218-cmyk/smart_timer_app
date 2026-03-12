@@ -22,18 +22,21 @@ class SchedulePage extends StatefulWidget {
 }
 
 class _SchedulePageState extends State<SchedulePage> {
+  // ★ 新增的變數
+  bool isRepeatMode = true; // true = 每週循環, false = 單次排程
+  DateTime selectedDate = DateTime.now(); // 單次排程用的日期
+
   List<bool> days = List.generate(7, (_) => false);
   TimeOfDay start = const TimeOfDay(hour: 18, minute: 0);
   TimeOfDay end = const TimeOfDay(hour: 22, minute: 0);
-  bool isLoading = true; // 新增：用來顯示載入中的圈圈
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadExistingSchedule(); // ★ 頁面一打開，立刻去 Firebase 抓資料
+    _loadExistingSchedule();
   }
 
-  // ★★★ 核心功能：從 Firebase 讀取該設備目前的排程記憶 ★★★
   Future<void> _loadExistingSchedule() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -45,7 +48,19 @@ class _SchedulePageState extends State<SchedulePage> {
       final data = Map<String, dynamic>.from(snapshot.value as Map);
       
       setState(() {
-        // 1. 讀取星期幾
+        // ★ 1. 讀取排程模式 (如果是單次排程)
+        if (data['schedule_mode'] == 'once') {
+          isRepeatMode = false;
+        } else {
+          isRepeatMode = true;
+        }
+
+        // ★ 2. 讀取單次排程的日期
+        if (data['schedule_date'] != null) {
+          selectedDate = DateTime.tryParse(data['schedule_date']) ?? DateTime.now();
+        }
+
+        // 3. 讀取星期幾 (維持不變)
         if (data['schedule_days'] != null) {
           List<dynamic> savedDays = data['schedule_days'];
           for (int i = 0; i < savedDays.length && i < 7; i++) {
@@ -53,29 +68,40 @@ class _SchedulePageState extends State<SchedulePage> {
           }
         }
 
-        // 2. 讀取開始時間 (例如 "18:30" 拆解成 18 和 30)
+        // 讀取時間 (維持原本的寫法)
         if (data['timer_start'] != null && data['timer_start'].toString().isNotEmpty) {
           final parts = data['timer_start'].toString().split(':');
-          if (parts.length == 2) {
-            start = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-          }
+          if (parts.length == 2) start = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
         }
-
-        // 3. 讀取結束時間
         if (data['timer_end'] != null && data['timer_end'].toString().isNotEmpty) {
           final parts = data['timer_end'].toString().split(':');
-          if (parts.length == 2) {
-            end = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-          }
+          if (parts.length == 2) end = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
         }
       });
     }
-    
-    // 讀取完畢，關閉載入動畫
-    setState(() {
-      isLoading = false;
-    });
+    setState(() => isLoading = false);
   }
+
+  // ★ 新增：選擇日期的功能
+  Future<void> _pickDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime.now(), // 不能選過去的時間
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) => Theme(
+        data: ThemeData.light().copyWith(
+          colorScheme: const ColorScheme.light(primary: Colors.black, onSurface: Colors.black),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      setState(() => selectedDate = picked);
+    }
+  }
+
+  // ... 底下的 pickTime 維持不變
 
   Future<void> pickTime({required bool isStart}) async {
     final initial = isStart ? start : end;
@@ -98,9 +124,9 @@ class _SchedulePageState extends State<SchedulePage> {
   }
 
   void sendSchedule() async {
-    // 1. 基本防呆
-    if (!days.contains(true)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請至少選擇一天')));
+    // 1. 防呆檢查：依照模式不同有不同的檢查
+    if (isRepeatMode && !days.contains(true)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('循環排程請至少選擇一天')));
       return;
     }
 
@@ -111,22 +137,10 @@ class _SchedulePageState extends State<SchedulePage> {
       return; 
     }
 
-    // 2. 格式化時間
+    // 2. 格式化時間與日期
     final startStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
     final endStr = "${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}";
-
-    // ★★★ 新增：判定「現在」是否應該立即開啟設備 ★★★
-    final now = DateTime.now();
-    bool shouldBeActiveNow = false;
-    
-    // 檢查今天是否有排程
-    if (days[now.weekday - 1]) {
-      final int nowMinutes = now.hour * 60 + now.minute;
-      // 如果現在時間在 start 和 end 之間
-      if (nowMinutes >= startMinutes && nowMinutes < endMinutes) {
-        shouldBeActiveNow = true;
-      }
-    }
+    final dateStr = "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}";
 
     setState(() => isLoading = true);
 
@@ -136,34 +150,37 @@ class _SchedulePageState extends State<SchedulePage> {
 
       final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
       
-      // 3. 執行 Firebase 更新
+      // ★ 3. 準備發送給硬體的 MQTT 封包 (區分模式)
+      final Map<String, dynamic> schedulePayload = {
+        "device_id": widget.deviceId,
+        "mode": isRepeatMode ? "repeat" : "once", // 告知硬體這是哪種模式
+        "start": startStr,
+        "end": endStr,
+      };
+
+      if (isRepeatMode) {
+        schedulePayload["days"] = days; // 循環模式傳送布林值陣列
+      } else {
+        schedulePayload["date"] = dateStr; // 單次模式傳送日期字串
+      }
+
+      // 4. 執行 Firebase 更新
       await ref.update({
         'timer_start': startStr,
         'timer_end': endStr,
-        'schedule_days': days,
-        'is_active': shouldBeActiveNow, // ★ 這裡根據排程判定自動切換狀態
+        'schedule_mode': isRepeatMode ? 'repeat' : 'once',
+        'schedule_days': isRepeatMode ? days : null, // 不是循環就清空
+        'schedule_date': isRepeatMode ? null : dateStr, // 不是單次就清空
         'last_updated': DateTime.now().toIso8601String(),
       });
 
-      // 4. 發送 MQTT (讓硬體同步)
-      try {
-        final schedule = {
-          "device_id": widget.deviceId,
-          "days": days,
-          "start": startStr,
-          "end": endStr,
-          "is_active": shouldBeActiveNow, // 同步告知硬體
-        };
-        MqttService().publish('smart_timer/schedule', jsonEncode(schedule));
-      } catch (mqttError) {
-        debugPrint("MQTT 同步失敗: $mqttError");
-      }
-      // 5. 顯示成功彈窗
+      // 5. 發送 MQTT
+      MqttService().publish('smart_timer/schedule', jsonEncode(schedulePayload));
+
       if (!mounted) return;
-      
-      // 先關閉讀取狀態
       setState(() => isLoading = false);
 
+      // (這裏接續你原本的 showDialog 成功彈窗邏輯...)
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -177,12 +194,12 @@ class _SchedulePageState extends State<SchedulePage> {
               Text('設定成功', style: TextStyle(fontWeight: FontWeight.bold)),
             ],
           ),
-          content: Text('${widget.deviceName} 的排程已更新並同步至雲端。'),
+          content: Text('${widget.deviceName} 的排程已更新並同步。'),
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.pop(ctx);     // 關閉彈窗
-                Navigator.pop(context); // 回到首頁
+                Navigator.pop(ctx);
+                Navigator.pop(context);
               },
               child: const Text('我知道了', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             ),
@@ -191,13 +208,10 @@ class _SchedulePageState extends State<SchedulePage> {
       );
 
     } catch (e) {
-      // 只有當 Firebase 寫入真的報錯時才會跑到這裡
-      debugPrint("Firebase 儲存真正失敗: $e");
+      debugPrint("儲存失敗: $e");
       if (mounted) {
         setState(() => isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('儲存失敗，請檢查網路連線: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('儲存失敗: $e')));
       }
     }
   }
@@ -233,10 +247,14 @@ class _SchedulePageState extends State<SchedulePage> {
         days = List.generate(7, (_) => false);
       });
 
-      // 2. 更新 Firebase
+      // 2. 更新 Firebase (★ 徹底清空所有排程欄位)
       final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
       await ref.update({
-        'schedule_days': days,
+        'timer_start': "",       // 清空開始時間
+        'timer_end': "",         // 清空結束時間
+        'schedule_mode': null,   // 移除模式
+        'schedule_days': null,   // 移除循環天數
+        'schedule_date': null,   // 移除單次日期
         'last_updated': DateTime.now().toIso8601String(),
       });
 
@@ -278,51 +296,111 @@ class _SchedulePageState extends State<SchedulePage> {
               '設定 ${widget.deviceName}',
               style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black, letterSpacing: 1.2),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             
-            // 星期選擇區
-            // ★ 升級版：星期選擇區 (絕對不會換行)
+            // ★ 新增：超有質感的模式切換開關
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 8),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.black12),
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(16),
               ),
-              child: Row( // 改用 Row
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: List.generate(7, (i) {
-                  final dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
-                  bool isSelected = days[i];
-                  return Expanded( // ★ 用 Expanded 讓 7 個按鈕平分寬度
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2.0), // 縮小按鈕之間的間距
-                      child: ChoiceChip(
-                        labelPadding: EdgeInsets.zero, // 消滅預設的左右留白
-                        label: Center(child: Text(dayLabels[i])), // 讓字體乖乖置中
-                        selected: isSelected,
-                        onSelected: (v) => setState(() => days[i] = v),
-                        selectedColor: Colors.black,
-                        backgroundColor: Colors.white,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.white : Colors.black,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                        shape: RoundedRectangleBorder(
+              padding: const EdgeInsets.all(4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => isRepeatMode = true),
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isRepeatMode ? Colors.white : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: isSelected ? Colors.black : Colors.black12),
+                          boxShadow: isRepeatMode ? [const BoxShadow(color: Colors.black12, blurRadius: 4)] : null,
                         ),
-                        showCheckmark: false,
+                        child: Text('每週循環', style: TextStyle(fontWeight: FontWeight.bold, color: isRepeatMode ? Colors.black : Colors.black54)),
                       ),
                     ),
-                  );
-                }),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => isRepeatMode = false),
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: !isRepeatMode ? Colors.white : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: !isRepeatMode ? [const BoxShadow(color: Colors.black12, blurRadius: 4)] : null,
+                        ),
+                        child: Text('單次特定時間', style: TextStyle(fontWeight: FontWeight.bold, color: !isRepeatMode ? Colors.black : Colors.black54)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+            const SizedBox(height: 24),
+
+            // ★ 根據模式顯示不同的 UI
+            // ★ 根據模式顯示不同的 UI
+            if (isRepeatMode) ...[
+              const Text('重複日期', style: TextStyle(color: Colors.black54, fontSize: 14)),
+              const SizedBox(height: 8),
+              
+              // ★ 把不見的星期選擇補回來！
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.black12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: List.generate(7, (i) {
+                    final dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+                    bool isSelected = days[i];
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                        child: ChoiceChip(
+                          labelPadding: EdgeInsets.zero,
+                          label: Center(child: Text(dayLabels[i])),
+                          selected: isSelected,
+                          onSelected: (v) => setState(() => days[i] = v),
+                          selectedColor: Colors.black,
+                          backgroundColor: Colors.white,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: isSelected ? Colors.black : Colors.black12),
+                          ),
+                          showCheckmark: false,
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ] else ...[
+              const Text('指定日期', style: TextStyle(color: Colors.black54, fontSize: 14)),
+              // ... 下面維持原本的 _buildTimeTile ...
+              _buildTimeTile(
+                label: '選擇日期',
+                time: "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}",
+                icon: Icons.calendar_month_rounded,
+                onTap: _pickDate,
+              ),
+            ],
             
             const SizedBox(height: 32),
             const Text('運行時間段', style: TextStyle(color: Colors.black54, fontSize: 14)),
             const SizedBox(height: 16),
+            // ... 底下接你原本的 開始時間、結束時間、按鈕 ...
 
             _buildTimeTile(
               label: '開始時間',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // ★ 新增：引入 Auth
+import 'schedule_page.dart'; // ★ 確保有這行
 
 class ServicePage extends StatefulWidget {
   final String zoneId;   // 知道是哪個區域 (例如 zone_01)
@@ -71,110 +72,6 @@ class _ServicePageState extends State<ServicePage> {
           ),
         ],
       ),
-    );
-  }
-
-  // 時間選擇器
-  // 時間選擇器 (加入過去時間防呆)
-  Future<String?> _pickDateTime() async {
-    // 1. 選日期 (已經擋掉昨天以前的日期)
-    final DateTime? date = await showDatePicker(
-      context: context, 
-      initialDate: DateTime.now(), 
-      firstDate: DateTime.now(), 
-      lastDate: DateTime(2030),
-    );
-    if (date == null) return null;
-    
-    // 2. 選時間
-    if (!mounted) return null;
-    final TimeOfDay? time = await showTimePicker(
-      context: context, 
-      initialTime: TimeOfDay.now(),
-    );
-    if (time == null) return null;
-
-    // 3. 組合出完整的 DateTime
-    final DateTime fullDateTime = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-
-    // ★★★ 關鍵防呆 1：檢查是否早於現在時間 ★★★
-    if (fullDateTime.isBefore(DateTime.now())) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ 無法設定過去的時間，請重新選擇！'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-      return null; // 擋下來，當作沒選
-    }
-
-    // 格式化回傳
-    return _formatDateTime(fullDateTime);
-  }
-
-  // 排程設定彈窗
-  void _showScheduleDialog(String id, String currentStart, String currentEnd) {
-    String tempStart = currentStart;
-    String tempEnd = currentEnd;
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text('設定排程'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    title: const Text("開始時間"),
-                    subtitle: Text(tempStart.isEmpty ? "未設定" : tempStart),
-                    trailing: const Icon(Icons.calendar_today),
-                    onTap: () async {
-                      String? res = await _pickDateTime();
-                      if (res != null) setStateDialog(() => tempStart = res);
-                    },
-                  ),
-                  const Divider(),
-                  ListTile(
-                    title: const Text("結束時間"),
-                    subtitle: Text(tempEnd.isEmpty ? "未設定" : tempEnd),
-                    trailing: const Icon(Icons.event_busy),
-                    onTap: () async {
-                      String? res = await _pickDateTime();
-                      if (res != null) setStateDialog(() => tempEnd = res);
-                    },
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    _devicesRef.child(id).update({'timer_start': "", 'timer_end': ""});
-                    Navigator.pop(context);
-                  },
-                  child: const Text('清除', style: TextStyle(color: Colors.red)),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    if (tempStart.isEmpty || tempEnd.isEmpty) return;
-                    if (tempEnd.compareTo(tempStart) <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('結束時間必須晚於開始時間')));
-                      return;
-                    }
-                    _devicesRef.child(id).update({'timer_start': tempStart, 'timer_end': tempEnd});
-                    Navigator.pop(context);
-                  },
-                  child: const Text('儲存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
     );
   }
 
@@ -266,9 +163,21 @@ class _ServicePageState extends State<ServicePage> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // ★ 升級版：點擊日曆圖示，直接跳轉到我們最強的排程頁面
                     IconButton(
                       icon: Icon(Icons.date_range, color: hasSchedule ? Colors.blue : Colors.grey[300]),
-                      onPressed: () => _showScheduleDialog(id, start, end),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SchedulePage(
+                              zoneId: widget.zoneId,
+                              deviceId: id,
+                              deviceName: name,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     Switch(
                       value: isActive,
