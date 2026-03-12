@@ -115,37 +115,49 @@ class _SchedulePageState extends State<SchedulePage> {
     final startStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
     final endStr = "${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}";
 
+    // ★★★ 新增：判定「現在」是否應該立即開啟設備 ★★★
+    final now = DateTime.now();
+    bool shouldBeActiveNow = false;
+    
+    // 檢查今天是否有排程
+    if (days[now.weekday - 1]) {
+      final int nowMinutes = now.hour * 60 + now.minute;
+      // 如果現在時間在 start 和 end 之間
+      if (nowMinutes >= startMinutes && nowMinutes < endMinutes) {
+        shouldBeActiveNow = true;
+      }
+    }
+
     setState(() => isLoading = true);
 
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) throw Exception("使用者未登入");
 
-      // 3. 執行 Firebase 寫入
       final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
       
-      // 注意：使用 await 確保 Firebase 寫入完成
+      // 3. 執行 Firebase 更新
       await ref.update({
         'timer_start': startStr,
         'timer_end': endStr,
         'schedule_days': days,
+        'is_active': shouldBeActiveNow, // ★ 這裡根據排程判定自動切換狀態
         'last_updated': DateTime.now().toIso8601String(),
       });
 
-      // 4. 發送 MQTT (放入另一個 try 區塊，避免 MQTT 失敗影響到 UI 回饋)
+      // 4. 發送 MQTT (讓硬體同步)
       try {
         final schedule = {
           "device_id": widget.deviceId,
           "days": days,
           "start": startStr,
           "end": endStr,
+          "is_active": shouldBeActiveNow, // 同步告知硬體
         };
         MqttService().publish('smart_timer/schedule', jsonEncode(schedule));
       } catch (mqttError) {
-        debugPrint("MQTT 發送失敗（硬體可能暫時無法接收），但雲端已儲存: $mqttError");
-        // 這裡可以選擇不報錯，因為雲端已經存好了
+        debugPrint("MQTT 同步失敗: $mqttError");
       }
-
       // 5. 顯示成功彈窗
       if (!mounted) return;
       
