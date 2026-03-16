@@ -240,7 +240,6 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
   _executeToggle(zoneId, deviceId, currentStatus); 
 }
 
-  
 
   @override
   Widget build(BuildContext context) {
@@ -361,7 +360,7 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
                             color: isRunning ? Colors.white : Colors.black,
                           ),
                         ),
-                        title: Text(dev['name'] ?? '未知設備', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        title: Text(dev['id'] ?? '未知設備', style: const TextStyle(fontWeight: FontWeight.bold)),
                         // ★ 升級版的副標題：包含狀態與排程時間
                         // ★ 升級版的副標題：防溢出設計
                         subtitle: Column(
@@ -424,7 +423,6 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
   // 這裡我們直接從傳入的 dev Map 中提取 ID 和名稱
   final String zoneId = dev['zoneId'];
   final String deviceId = dev['id'];
-  final String deviceName = dev['name'] ?? '設備';
 
   Navigator.push(
     context,
@@ -432,7 +430,6 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
       builder: (_) => SchedulePage(
         zoneId: zoneId,      // 修正：使用從 dev 取得的 zoneId
         deviceId: deviceId,  // 修正：使用從 dev 取得的 id
-        deviceName: deviceName, // 修正：使用從 dev 取得的 name
       ),
     ),
   );

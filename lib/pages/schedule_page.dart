@@ -8,13 +8,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 class SchedulePage extends StatefulWidget {
   final String zoneId;
   final String deviceId;
-  final String deviceName;
   
   const SchedulePage({
     super.key, 
     required this.zoneId, 
     required this.deviceId, 
-    required this.deviceName,
   });
 
   @override
@@ -69,7 +67,7 @@ void initState() {
           }
         }
 
-        // 讀取時間 (維持原本的寫法)
+        // 讀取時間
         if (data['timer_start'] != null && data['timer_start'].toString().isNotEmpty) {
           final parts = data['timer_start'].toString().split(':');
           if (parts.length == 2) start = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
@@ -101,8 +99,6 @@ void initState() {
       setState(() => selectedDate = picked);
     }
   }
-
-  // ... 底下的 pickTime 維持不變
 
   Future<void> pickTime({required bool isStart}) async {
     final initial = isStart ? start : end;
@@ -198,7 +194,7 @@ void initState() {
               Text('設定成功', style: TextStyle(fontWeight: FontWeight.bold)),
             ],
           ),
-          content: Text('${widget.deviceName} 的排程已更新並同步。'),
+          content: Text('${widget.deviceId} 的排程已更新並同步。'),
           actions: [
             TextButton(
               onPressed: () {
@@ -280,7 +276,7 @@ void initState() {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '設定 ${widget.deviceName}',
+              '設定 ${widget.deviceId}',
               style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black, letterSpacing: 1.2),
             ),
             const SizedBox(height: 24),

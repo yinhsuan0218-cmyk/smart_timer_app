@@ -60,7 +60,6 @@ class _ServicePageState extends State<ServicePage> {
 
   // 新增裝置
   void addDevice() {
-    final TextEditingController nameController = TextEditingController();
     final TextEditingController idController = TextEditingController();
 
     showDialog(
@@ -70,7 +69,7 @@ class _ServicePageState extends State<ServicePage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameController, decoration: const InputDecoration(labelText: '裝置名稱', hintText: '例如：吸頂燈')),
+            //TextField(controller: nameController, decoration: const InputDecoration(labelText: '裝置名稱', hintText: '例如：吸頂燈')),
             TextField(controller: idController, decoration: const InputDecoration(labelText: '自訂 ID', hintText: '例如：light_01')),
           ],
         ),
@@ -78,10 +77,9 @@ class _ServicePageState extends State<ServicePage> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           TextButton(
             onPressed: () {
-              if (nameController.text.isNotEmpty && idController.text.isNotEmpty) {
+              if (idController.text.isNotEmpty) {
                 // 寫入到該使用者的該區域底下
                 _devicesRef.child(idController.text.trim()).set({
-                  'name': nameController.text.trim(),
                   'is_active': false,
                   'timer_start': "",
                   'timer_end': "",
@@ -142,7 +140,6 @@ class _ServicePageState extends State<ServicePage> {
 
   // 裝置卡片 UI 
   Widget _buildDeviceCard(Map<String, dynamic> device) {
-    String name = device['name'] ?? '未命名';
     bool isActive = device['is_active'] ?? false;
     String id = device['id'];
     String start = device['timer_start'] ?? "";
@@ -157,7 +154,7 @@ class _ServicePageState extends State<ServicePage> {
         confirmDismiss: (d) async => await showDialog(
           context: context,
           builder: (c) => AlertDialog(
-            title: Text('刪除 $name?'), content: const Text('確定移除嗎？'),
+            title: Text('刪除 $id?'), content: const Text('確定移除嗎？'),
             actions: [
               TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("取消")),
               TextButton(onPressed: () => Navigator.pop(c, true), child: const Text("刪除", style: TextStyle(color: Colors.red))),
@@ -179,7 +176,7 @@ class _ServicePageState extends State<ServicePage> {
             children: [
               ListTile(
                 leading: Icon(Icons.power, color: isActive ? Colors.orange : Colors.grey),
-                title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                title: Text(id, style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(isActive ? "開啟中" : "已關閉"),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -194,7 +191,6 @@ class _ServicePageState extends State<ServicePage> {
                             builder: (_) => SchedulePage(
                               zoneId: widget.zoneId,
                               deviceId: id,
-                              deviceName: name,
                             ),
                           ),
                         );
