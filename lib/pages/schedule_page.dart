@@ -9,7 +9,7 @@ class SchedulePage extends StatefulWidget {
   final String zoneId;
   final String deviceId;
   final String deviceName;
-
+  
   const SchedulePage({
     super.key, 
     required this.zoneId, 
@@ -25,17 +25,18 @@ class _SchedulePageState extends State<SchedulePage> {
   // ★ 新增的變數
   bool isRepeatMode = true; // true = 每週循環, false = 單次排程
   DateTime selectedDate = DateTime.now(); // 單次排程用的日期
-
+  final MqttService _mqttService = MqttService();
   List<bool> days = List.generate(7, (_) => false);
   TimeOfDay start = const TimeOfDay(hour: 18, minute: 0);
   TimeOfDay end = const TimeOfDay(hour: 22, minute: 0);
   bool isLoading = true;
 
   @override
-  void initState() {
-    super.initState();
-    _loadExistingSchedule();
-  }
+void initState() {
+  super.initState();
+  _mqttService.connect(); // 確保進入設定頁時 MQTT 是連線狀態
+  _loadExistingSchedule();
+}
 
   Future<void> _loadExistingSchedule() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -148,37 +149,40 @@ class _SchedulePageState extends State<SchedulePage> {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) throw Exception("使用者未登入");
 
-      final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
-      
-      // ★ 3. 準備發送給硬體的 MQTT 封包 (區分模式)
+      // ★ 修正：與硬體端約定好 Topic 格式
+      // 建議格式：users/UID/zones/ZONE_ID/devices/DEVICE_ID/schedule
+      final String mqttTopic = 'users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}/schedule';
+
       final Map<String, dynamic> schedulePayload = {
         "device_id": widget.deviceId,
-        "mode": isRepeatMode ? "repeat" : "once", // 告知硬體這是哪種模式
+        "mode": isRepeatMode ? "repeat" : "once",
         "start": startStr,
         "end": endStr,
+        "is_enabled": true,
       };
 
       if (isRepeatMode) {
-        schedulePayload["days"] = days; // 循環模式傳送布林值陣列
+        schedulePayload["days"] = days; 
       } else {
-        schedulePayload["date"] = dateStr; // 單次模式傳送日期字串
+        schedulePayload["date"] = dateStr; 
       }
 
-      // 4. 執行 Firebase 更新
+      // 1. 同步到 Firebase (雲端備份)
+      final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
       await ref.update({
         'timer_start': startStr,
         'timer_end': endStr,
         'schedule_mode': isRepeatMode ? 'repeat' : 'once',
-        'schedule_days': isRepeatMode ? days : null, // 不是循環就清空
-        'schedule_date': isRepeatMode ? null : dateStr, // 不是單次就清空
+        'schedule_days': isRepeatMode ? days : null,
+        'schedule_date': isRepeatMode ? null : dateStr,
         'last_updated': DateTime.now().toIso8601String(),
       });
 
-      // 5. 發送 MQTT
-      MqttService().publish('smart_timer/schedule', jsonEncode(schedulePayload));
+      // 2. 透過 MQTT 即時通知硬體
+      _mqttService.publish(mqttTopic, jsonEncode(schedulePayload));
 
-      if (!mounted) return;
-      setState(() => isLoading = false);
+    if (!mounted) return;
+    setState(() => isLoading = false);
 
       // (這裏接續你原本的 showDialog 成功彈窗邏輯...)
       showDialog(
@@ -236,37 +240,20 @@ class _SchedulePageState extends State<SchedulePage> {
 
     if (confirm != true) return;
 
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
 
-    setState(() => isLoading = true); // 顯示讀取中
+  setState(() => isLoading = true);
 
-    try {
-      // 1. 更新 UI 狀態
-      setState(() {
-        days = List.generate(7, (_) => false);
-      });
-
-      // 2. 更新 Firebase (★ 徹底清空所有排程欄位)
-      final ref = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}');
-      await ref.update({
-        'timer_start': "",       // 清空開始時間
-        'timer_end': "",         // 清空結束時間
-        'schedule_mode': null,   // 移除模式
-        'schedule_days': null,   // 移除循環天數
-        'schedule_date': null,   // 移除單次日期
-        'last_updated': DateTime.now().toIso8601String(),
-      });
-
-      // 3. 發送 MQTT 告知 ESP32
-      final schedule = {
-        "device_id": widget.deviceId,
-        "days": days,
-        "start": "",
-        "end": "",
-        "action": "cancel"
-      };
-      MqttService().publish('smart_timer/schedule', jsonEncode(schedule));
+  try {
+    // 在 cancelSchedule 的 try 區塊內
+  final String mqttTopic = 'users/$uid/zones/${widget.zoneId}/devices/${widget.deviceId}/schedule';
+  final cancelPayload = {
+    "device_id": widget.deviceId,
+    "is_enabled": false, // 告訴硬體現在排程關閉了
+    "action": "clear"
+  };
+  _mqttService.publish(mqttTopic, jsonEncode(cancelPayload));
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

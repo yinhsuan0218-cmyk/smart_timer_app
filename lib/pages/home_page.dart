@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart'; // 務必確認有這行
-import 'schedule_page.dart';
+import '../models/zone.dart';
+import '../models/service.dart';
 import 'commonappbar.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // ★ 務必加上這行
+import 'schedule_page.dart';
+import '../services/mqtt_service.dart';
 
 class HomePage extends StatefulWidget {
   final bool showTutorial;
@@ -18,7 +21,7 @@ class _HomePageState extends State<HomePage> {
   // 改成 late 變數
   late DatabaseReference _zonesRef;
   String? uid;
-
+  final MqttService _mqttService = MqttService(); // ★ 初始化 MQTT 服務
   @override
   void initState() {
     super.initState();
@@ -32,12 +35,53 @@ class _HomePageState extends State<HomePage> {
     } else {
       _zonesRef = FirebaseDatabase.instance.ref('zones'); // 防呆預設
     }
+    // 連接 MQTT
+    _mqttService.connect();
 
     // 原本的教學彈窗邏輯保留
     if (widget.showTutorial) {
       Future.delayed(const Duration(seconds: 1), _showCompletionDialog);
     }
   }
+
+  // 1. 統一入口：檢查排程並決定是否彈窗
+void _handleToggle(String zoneId, String deviceId, bool currentStatus, Map<String, dynamic> dev) {
+  bool inSchedule = _isDeviceInSchedule(dev);
+
+  if (inSchedule) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('排程衝突警告'),
+        content: Text('該設備目前在排程時段內 (${_getScheduleText(dev)})，確定要手動切換嗎？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _executeToggle(zoneId, deviceId, currentStatus);
+            },
+            child: const Text('確認切換'),
+          ),
+        ],
+      ),
+    );
+  } else {
+    _executeToggle(zoneId, deviceId, currentStatus);
+  }
+}
+
+// 2. 統一執行點：同時更新 Firebase 與 MQTT
+void _executeToggle(String zoneId, String deviceId, bool currentStatus) {
+  bool nextStatus = !currentStatus;
+  _zonesRef.child('$zoneId/devices/$deviceId').update({'is_active': nextStatus});
+  _publishMqttCommand(zoneId, deviceId, nextStatus);
+}
+void _publishMqttCommand(String zoneId, String deviceId, bool status) {
+  final String topic = 'users/$uid/zones/$zoneId/devices/$deviceId/command';
+  final String message = status ? 'ON' : 'OFF';
+  _mqttService.publish(topic, message);
+}
 
   void _showCompletionDialog() {
     if (!context.mounted) return;
@@ -192,11 +236,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-// 抽離出來的更新邏輯
 void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
-  _zonesRef.child('$zoneId/devices/$deviceId').update({
-    'is_active': !currentStatus,
-  });
+  _executeToggle(zoneId, deviceId, currentStatus); 
 }
 
   
@@ -351,22 +392,12 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.calendar_today_rounded),
-                              onPressed: () {
-                                Navigator.push(
-                                  context, 
-                                  MaterialPageRoute(
-                                    builder: (_) => SchedulePage(
-                                      zoneId: dev['zoneId'],          // 把區域ID傳過去
-                                      deviceId: dev['id'],            // 把設備ID傳過去
-                                      deviceName: dev['name'] ?? '設備', // 把名字傳過去
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                            
                             // 在 ListTile 的 trailing 中
+                            IconButton(
+                              icon: const Icon(Icons.timer_outlined),
+                              onPressed: () => _navigateToTimer(dev), // 直接呼叫你封裝好的方法，乾淨俐落
+                            ),
                             IconButton(
                               icon: Icon(
                                 Icons.power_settings_new_rounded, 
@@ -374,7 +405,7 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
                                 size: 28,
                               ),
                               // 修改這裡：傳入 dev 參數
-                              onPressed: () => _toggleDevice(dev['zoneId'], dev['id'], isRunning, dev),
+                              onPressed: () => _handleToggle(dev['zoneId'], dev['id'], isRunning, dev),
                             ),
                           ],
                         ),
@@ -389,7 +420,23 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
       ),
     );
   }
+  void _navigateToTimer(Map<String, dynamic> dev) {
+  // 這裡我們直接從傳入的 dev Map 中提取 ID 和名稱
+  final String zoneId = dev['zoneId'];
+  final String deviceId = dev['id'];
+  final String deviceName = dev['name'] ?? '設備';
 
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => SchedulePage(
+        zoneId: zoneId,      // 修正：使用從 dev 取得的 zoneId
+        deviceId: deviceId,  // 修正：使用從 dev 取得的 id
+        deviceName: deviceName, // 修正：使用從 dev 取得的 name
+      ),
+    ),
+  );
+}
   Widget _buildEmptyState() {
     return Center(
       child: Column(

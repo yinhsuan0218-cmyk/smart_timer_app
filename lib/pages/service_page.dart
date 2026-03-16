@@ -2,12 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // ★ 新增：引入 Auth
 import 'schedule_page.dart'; // ★ 確保有這行
+import '../services/mqtt_service.dart'; // ★ 確保路徑正確，引入你的 MQTT 服務
 
 class ServicePage extends StatefulWidget {
   final String zoneId;   // 知道是哪個區域 (例如 zone_01)
-  final String zoneName; // 知道區域名字 (例如 客廳)
+  final String zoneName; 
+  final String mqttTopic; // ★ 新增：接收來自 ZonePage 的主題// 知道區域名字 (例如 客廳)
 
-  const ServicePage({super.key, required this.zoneId, required this.zoneName});
+  // ★ 修正後的建構函式
+  const ServicePage({
+    super.key,
+    required this.zoneId,
+    required this.zoneName,
+    required this.mqttTopic,
+  });
 
   @override
   State<ServicePage> createState() => _ServicePageState();
@@ -16,13 +24,15 @@ class ServicePage extends StatefulWidget {
 class _ServicePageState extends State<ServicePage> {
   late DatabaseReference _devicesRef; 
   String? uid; // ★ 新增用來存 UID
+  final MqttService _mqttService = MqttService(); // ★ 初始化 MQTT 服務
 
   @override
   void initState() {
     super.initState();
     // ★ 抓取目前登入使用者的 UID
     uid = FirebaseAuth.instance.currentUser?.uid;
-
+    // 連接 MQTT Broker
+    _mqttService.connect();
     // ★ 關鍵修改：路徑變成 'users/你的UID/zones/區域ID/devices'
     if (uid != null) {
       _devicesRef = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}/devices');
@@ -31,7 +41,18 @@ class _ServicePageState extends State<ServicePage> {
       _devicesRef = FirebaseDatabase.instance.ref('zones/${widget.zoneId}/devices');
     }
   }
+  // ★ 新增：處理開關切換並發送 MQTT
+  void _toggleDevice(String deviceId, bool status) {
+    // 1. 更新 Firebase 狀態（讓 UI 跟著動）
+    _devicesRef.child(deviceId).update({'is_active': status});
 
+    // 2. 發送 MQTT 指令到指定的 Topic
+    // 指令格式建議： "DEVICE_ID:ON" 或 "DEVICE_ID:OFF"
+    String command = status ? "ON" : "OFF";
+    _mqttService.publishCommand(widget.mqttTopic, "$deviceId:$command");
+    
+    print("發送 MQTT 指令到 ${widget.mqttTopic} : $deviceId:$command");
+  }
   // 輔助函式：時間格式化
   String _formatDateTime(DateTime dt) {
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
@@ -179,10 +200,11 @@ class _ServicePageState extends State<ServicePage> {
                         );
                       },
                     ),
+                    // 修改後 ★
                     Switch(
                       value: isActive,
                       activeColor: Colors.black,
-                      onChanged: (val) => _devicesRef.child(id).update({'is_active': val}),
+                      onChanged: (val) => _toggleDevice(id, val), // 調用此函式才會發送 MQTT
                     ),
                   ],
                 ),

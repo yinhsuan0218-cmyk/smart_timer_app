@@ -161,10 +161,17 @@ class _ZonePageState extends State<ZonePage> {
           child: const Icon(Icons.delete, color: Colors.red),
         ),
         child: GestureDetector(
+          // 建議修改後的 onTap（增加 uid 傳遞）
           onTap: () {
             Navigator.push(
               context, 
-              MaterialPageRoute(builder: (_) => ServicePage(zoneId: id, zoneName: name))
+              MaterialPageRoute(
+                builder: (_) => ServicePage(
+                  zoneId: id, 
+                  zoneName: name,
+                  mqttTopic: 'users/$uid/zones/$id/commands', // 預先構建好 MQTT 主題
+                )
+              )
             );
           },
           child: Container(
