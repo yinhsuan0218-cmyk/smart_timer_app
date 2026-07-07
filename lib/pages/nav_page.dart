@@ -42,7 +42,7 @@ class _NavPageState extends State<NavPage> {
   void _showStep1() {
     _showTutorialDialog(
       title: "歡迎使用！",
-      content: "為了安全，請先前往「User」分頁填寫您的電話號碼。",
+      content: "為了安全，請先前往「User」分頁填寫您的wifi帳號密碼以及電話號碼。",
       buttonText: "前往 User 頁面",
       onConfirm: () {
         setState(() => _selectedIndex = 2);
