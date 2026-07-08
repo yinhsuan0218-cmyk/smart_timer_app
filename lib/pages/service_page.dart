@@ -3,7 +3,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // ★ 新增：引入 Auth
 import 'schedule_page.dart'; // ★ 確保有這行
 import '../services/mqtt_service.dart'; // ★ 確保路徑正確，引入你的 MQTT 服務
-
+import 'dart:math' as math;
 class ServicePage extends StatefulWidget {
   final String zoneId;   // 知道是哪個區域 (例如 zone_01)
   final String zoneName; 
@@ -279,7 +279,7 @@ class _ServicePageState extends State<ServicePage> {
       ),
     );
   }
-  // --- 💡 手繪感極簡儀表板 Widget ---
+ // --- 💡 修改後：完美呈現手繪感儀表板的 Widget ---
   Widget _buildTemperaturePanel(Color statusColor, String statusText, IconData statusIcon) {
     return Container(
       width: double.infinity,
@@ -288,57 +288,66 @@ class _ServicePageState extends State<ServicePage> {
       decoration: BoxDecoration(
         color: Colors.grey[50],
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.black12),
+        border: Border.all(color: Colors.black),
       ),
       child: Column(
         children: [
-          // 環形微圖表進度條（模擬圖中半圓儀表板效果）
+          // 📊 手繪半圓形儀表板本體
           SizedBox(
-            height: 70,
-            width: 70,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CircularProgressIndicator(
-                  value: (_currentTemperature / 60.0).clamp(0.0, 1.0), // 以 60 度為滿格參考
-                  strokeWidth: 8,
-                  backgroundColor: Colors.grey[200],
-                  valueColor: AlwaysStoppedAnimation<Color>(statusColor),
-                ),
-                Center(
-                  child: Icon(statusIcon, color: statusColor, size: 30),
-                )
-              ],
+            height: 80, // 半圓形稍微調整高度
+            width: 140, // 寬度拉長以符合半圓比例
+            child: CustomPaint(
+              painter: GaugePainter(
+                temperature: _currentTemperature,
+                safeMin: tempSafeMin,
+                warnMin: tempWarnMin,
+                dangerMin: tempDangerMin,
+              ),
             ),
           ),
           const SizedBox(height: 15),
+          
+          // 欄位排版（符合手繪稿的 Temp: [ 25°C ]  Status: [ Safe ] 橫向排列）
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // 溫度顯示欄位
-              Column(
+              Row(
                 children: [
-                  const Text('Temp', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 4),
+                  const Text('Temp : ', style: TextStyle(fontSize: 15, color: Colors.black, fontWeight: FontWeight.bold)),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.black12)),
-                    child: Text('${_currentTemperature.toStringAsFixed(1)} °C', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white, 
+                      borderRadius: BorderRadius.circular(8), 
+                      border: Border.all(color: Colors.black, width: 1.5), // 帶點黑邊手繪感
+                    ),
+                    child: Text('${_currentTemperature.toStringAsFixed(1)} °C', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
-              const SizedBox(width: 40),
+              const SizedBox(width: 24),
+              
               // 狀態燈與字樣顯示欄位
-              Column(
+              Row(
                 children: [
-                  const Text('Status', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 4),
+                  const Text('Status : ', style: TextStyle(fontSize: 15, color: Colors.black, fontWeight: FontWeight.bold)),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
-                    child: Text(
-                      statusText, 
-                      style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor, 
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.black, width: 1.5),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(statusIcon, color: Colors.white, size: 16),
+                        const SizedBox(width: 4),
+                        Text(
+                          statusText, 
+                          style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -434,5 +443,118 @@ class _ServicePageState extends State<ServicePage> {
         ),
       ),
     );
+  }
+}
+// 🎨 專門用來畫半圓形儀表板與指針的 Painter
+class GaugePainter extends CustomPainter {
+  final double temperature;
+  final double safeMin;
+  final double warnMin;
+  final double dangerMin;
+
+  GaugePainter({
+    required this.temperature,
+    required this.safeMin,
+    required this.warnMin,
+    required this.dangerMin,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Offset center = Offset(size.width / 2, size.height);
+    final double radius = size.width / 2;
+
+    // 1. 繪製半圓底色背景區間 (Safe:綠, Warn:黃, Danger:紅)
+    final double maxTempRef = 100.0; // 假設儀表板最大度數為 100 度
+    
+    // 計算各區間弧度比例
+    double warnStartPercent = (warnMin - safeMin) / maxTempRef;
+    double dangerStartPercent = (dangerMin - safeMin) / maxTempRef;
+
+    Paint arcPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 24.0; // 弧帶的粗細
+
+    // Safe 區間 (綠色)
+    arcPaint.color = Colors.green.withOpacity(0.3);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 12),
+      3.14159, // 從 180 度開始 (左側)
+      3.14159 * warnStartPercent,
+      false,
+      arcPaint,
+    );
+
+    // Warn 區間 (黃色/橘色)
+    arcPaint.color = Colors.amber.withOpacity(0.3);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 12),
+      3.14159 + (3.14159 * warnStartPercent),
+      3.14159 * (dangerStartPercent - warnStartPercent),
+      false,
+      arcPaint,
+    );
+
+    // Danger 區間 (紅色)
+    arcPaint.color = Colors.red.withOpacity(0.3);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 12),
+      3.14159 + (3.14159 * dangerStartPercent),
+      3.14159 * (1.0 - dangerStartPercent),
+      false,
+      arcPaint,
+    );
+
+    // 2. 繪製外圍黑框與刻度線 (手繪風格)
+    Paint borderPaint = Paint()
+      ..color = Colors.black.withOpacity(0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    // 繪製半圓外框形
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      3.14159,
+      3.14159,
+      false,
+      borderPaint,
+    );
+    // 繪製底部橫線
+    canvas.drawLine(Offset(center.dx - radius, center.dy), Offset(center.dx + radius, center.dy), borderPaint);
+
+    // 繪製 5 條簡單刻度
+    for (int i = 0; i <= 4; i++) {
+      double angle = 3.14159 + (3.14159 / 4 * i);
+      double startX = center.dx + (radius - 8) * math.cos(angle);
+      double startY = center.dy + (radius - 8) * math.sin(angle);
+      double endX = center.dx + radius * math.cos(angle);
+      double endY = center.dy + radius * math.sin(angle);
+      canvas.drawLine(Offset(startX, startY), Offset(endX, endY), borderPaint);
+    }
+
+    // 3. 繪製中心黑點與指針
+    Paint needlePaint = Paint()
+      ..color = Colors.black.withOpacity(0.8)
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+
+    // 依據當前溫度計算指針角度 (最小 0.0, 最大 maxTempRef)
+    double currentPercent = (temperature / maxTempRef).clamp(0.0, 1.0);
+    double needleAngle = 3.14159 + (3.14159 * currentPercent);
+
+
+    double needleLength = radius - 15;
+    double needleX = center.dx + needleLength * math.cos(needleAngle);
+    double needleY = center.dy + needleLength * math.sin(needleAngle);
+
+    // 畫指針箭頭主線
+    canvas.drawLine(center, Offset(needleX, needleY), needlePaint);
+    // 畫中心黑點
+    canvas.drawCircle(center, 6.0, Paint()..color = Colors.black);
+  }
+
+  @override
+  bool shouldRepaint(covariant GaugePainter oldDelegate) {
+    return oldDelegate.temperature != temperature;
   }
 }
