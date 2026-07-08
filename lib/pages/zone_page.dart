@@ -34,25 +34,30 @@ class _ZonePageState extends State<ZonePage> {
   void addZone() {
     final TextEditingController nameController = TextEditingController();
     
+    // 建立一個獨立的提交方法，讓按鈕和 Enter 鍵都能共用
+    void submit() {
+      if (nameController.text.isNotEmpty) {
+        _zonesRef.push().set({
+          'name': nameController.text.trim(),
+        });
+        Navigator.pop(context);
+      }
+    }
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('新增區域'),
         content: TextField(
           controller: nameController,
+          textInputAction: TextInputAction.done, // 讓軟體鍵盤的右下角顯示「完成」或「確認」圖示
+          onSubmitted: (_) => submit(),         // ★ 精髓：按下 Enter 鍵時觸發
           decoration: const InputDecoration(labelText: '區域名稱', hintText: '例如：客廳、主臥室'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           TextButton(
-            onPressed: () {
-              if (nameController.text.isNotEmpty) {
-                _zonesRef.push().set({
-                  'name': nameController.text.trim(),
-                });
-                Navigator.pop(context);
-              }
-            },
+            onPressed: submit, // 共用同一個提交邏輯
             child: const Text('新增'),
           ),
         ],
