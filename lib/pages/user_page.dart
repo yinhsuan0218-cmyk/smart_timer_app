@@ -14,9 +14,7 @@ class _UserPageState extends State<UserPage> {
   final user = FirebaseAuth.instance.currentUser;
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _wifiSsidController = TextEditingController();
-  final TextEditingController _wifiPasswordController = TextEditingController();
-  bool _isLoading = false; // 新增：讀取狀態控制
+  bool _isLoading = false; // 讀取狀態控制
 
   @override
   void initState() {
@@ -47,12 +45,6 @@ class _UserPageState extends State<UserPage> {
           if (data.containsKey('email')) {
             _emailController.text = data['email'].toString();
           }
-          if (data.containsKey('wifi_ssid')) {
-            _wifiSsidController.text = data['wifi_ssid'].toString();
-          }
-          if (data.containsKey('wifi_password')) {
-            _wifiPasswordController.text = data['wifi_password'].toString();
-          }
         });
       }
     } catch (e) {
@@ -63,20 +55,12 @@ class _UserPageState extends State<UserPage> {
   Future<void> _saveAndNext() async {
     final phone = _phoneController.text.trim();
     final email = _emailController.text.trim();
-    final wifiSsid = _wifiSsidController.text.trim();
-    final wifiPassword = _wifiPasswordController.text;
 
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('請填寫電話號碼以利緊急通知')),
       );
       return;
-    }
-
-    if (wifiSsid.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('提醒：填寫自家 Wi-Fi 資訊以便裝置連線')),
-      );
     }
 
     setState(() => _isLoading = true); // 開始儲存，進入讀取狀態
@@ -89,8 +73,6 @@ class _UserPageState extends State<UserPage> {
           'name': user?.displayName ?? '未設定',
           'email': email,
           'phone': phone,
-          'wifi_ssid': wifiSsid,        // 儲存 Wi-Fi 名稱
-          'wifi_password': wifiPassword, // 儲存 Wi-Fi 密碼
           'last_updated': DateTime.now().toIso8601String(),
         });
 
@@ -162,8 +144,6 @@ class _UserPageState extends State<UserPage> {
   void dispose() {
     _emailController.dispose();
     _phoneController.dispose();
-    _wifiSsidController.dispose();     // 記得釋放記憶體
-    _wifiPasswordController.dispose(); // 記得釋放記憶體
     super.dispose();
   }
 
@@ -198,35 +178,10 @@ class _UserPageState extends State<UserPage> {
             _buildEditField(label: '綁定的 Google 帳號', controller: _emailController, icon: Icons.alternate_email_rounded),
             const SizedBox(height: 20),
             _buildEditField(label: '電話號碼', controller: _phoneController, icon: Icons.phone_android_rounded, keyboardType: TextInputType.phone),
+            
             const SizedBox(height: 40),
 
-            const SizedBox(height: 30),
-            const Divider(color: Colors.black12, thickness: 1), // 加一條分隔線區隔
-            const SizedBox(height: 10),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '自家 Wi-Fi 設定', 
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black)
-              ),
-            ),
-            const SizedBox(height: 15),
-            _buildEditField(
-              label: 'Wi-Fi 名稱 (SSID)', 
-              controller: _wifiSsidController, 
-              icon: Icons.wifi_rounded
-            ),
-            const SizedBox(height: 20),
-            _buildEditField(
-              label: 'Wi-Fi 密碼', 
-              controller: _wifiPasswordController, 
-              icon: Icons.lock_outline_rounded,
-              // 如果希望密碼欄位隱碼，可以在下面的 _buildEditField 組件加入 obscureText 控制，此處先保持預設明碼方便使用者確認
-            ),
-
-            const SizedBox(height: 40),
-
-            // 更新按鈕 (增加 Loading 判斷)
+            // 更新按鈕
             SizedBox(
               width: double.infinity,
               height: 56,
