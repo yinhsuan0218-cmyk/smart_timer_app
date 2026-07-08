@@ -151,13 +151,13 @@ class _ServicePageState extends State<ServicePage> {
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
-  // 新增裝置（加入數量限制邏輯）
+  // 新增裝置（加入數量限制邏輯與 Enter 鍵觸發）
   void addDevice() {
     // 關鍵限制：如果目前的裝置數量已經達到或超過 2 個，直接攔截並跳出警告
     if (_currentDeviceCount >= 2) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ 每個智慧插座區域最多隻能綁定 2 個裝置！'),
+          content: Text('⚠️ 每個智慧插座區域最多只能綁定 2 個裝置！'),
           backgroundColor: Color(0xFF8B0000),
           behavior: SnackBarBehavior.floating,
         ),
@@ -166,6 +166,19 @@ class _ServicePageState extends State<ServicePage> {
     }
 
     final TextEditingController idController = TextEditingController();
+
+    // 抽出核心新增邏輯，供按鈕與鍵盤 Enter 共用
+    void submitNewDevice() {
+      final String deviceId = idController.text.trim();
+      if (deviceId.isNotEmpty) {
+        _devicesRef.child(deviceId).set({
+          'is_active': false,
+          'timer_start': "",
+          'timer_end': "",
+        });
+        Navigator.pop(context);
+      }
+    }
 
     showDialog(
       context: context,
@@ -176,9 +189,11 @@ class _ServicePageState extends State<ServicePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              controller: idController, 
+              controller: idController,
+              textInputAction: TextInputAction.done, // 將鍵盤右下角按鈕改為「完成」圖示
+              onSubmitted: (_) => submitNewDevice(),  // ★ 關鍵：按下鍵盤 Enter/完成鍵時觸發
               decoration: const InputDecoration(
-                labelText: '自訂 ID', 
+                labelText: '自訂 ID',
                 hintText: '例如：light_01',
                 border: OutlineInputBorder(),
               ),
@@ -186,18 +201,12 @@ class _ServicePageState extends State<ServicePage> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
           TextButton(
-            onPressed: () {
-              if (idController.text.isNotEmpty) {
-                _devicesRef.child(idController.text.trim()).set({
-                  'is_active': false,
-                  'timer_start': "",
-                  'timer_end': "",
-                });
-                Navigator.pop(context);
-              }
-            },
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: submitNewDevice, // 使用共用的新增邏輯
             child: const Text('新增', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
