@@ -22,7 +22,7 @@ class _NotificationPageState extends State<NotificationPage> {
   void _setupNotificationQuery() {
     _uid = FirebaseAuth.instance.currentUser?.uid;
     if (_uid != null) {
-      // 依照時間戳（key）排序，最新收到的高溫通知顯示在最上方
+      // 依照時間戳（key）排序，最新通知顯示在最上方
       _notificationQuery = FirebaseDatabase.instance
           .ref('users/$_uid/notifications')
           .orderByKey();
@@ -44,7 +44,7 @@ class _NotificationPageState extends State<NotificationPage> {
             Text("清除紀錄", style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
-        content: const Text("確定要清空所有的通知與溫度警報紀錄嗎？"),
+        content: const Text("確定要清空所有的操作通知與溫度警報紀錄嗎？"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -110,7 +110,7 @@ class _NotificationPageState extends State<NotificationPage> {
                     final String title = item['title'] ?? '系統提示';
                     final String content = item['content'] ?? '設備狀態已更新';
                     final String timeStr = item['timestamp'] ?? '';
-                    final String type = item['type'] ?? 'info'; // 'danger', 'warn', 'info'
+                    final String type = item['type'] ?? 'info'; 
 
                     return _buildNotificationItem(
                       notificationId: notificationId,
@@ -139,7 +139,7 @@ class _NotificationPageState extends State<NotificationPage> {
     );
   }
 
-  // 核心微調：根據不同的警報等級（danger / warn / info）渲染不同的卡片 UI
+  // 根據電器操作（藍色）與溫度異常（紅色）渲染不同的卡片 UI
   Widget _buildNotificationItem({
     required String notificationId,
     required String title,
@@ -147,23 +147,21 @@ class _NotificationPageState extends State<NotificationPage> {
     required String timeStr,
     required String type,
   }) {
-    Color themeColor = Colors.black;
-    Color bgColor = Colors.grey[100]!;
-    IconData iconData = Icons.notifications_rounded;
+    Color themeColor;
+    Color bgColor;
+    IconData iconData;
 
-    // 對接 ServicePage 的三個溫度狀態等級
-    if (type == 'danger') {
-      themeColor = Colors.red;
-      bgColor = Colors.red[50]!;
-      iconData = Icons.gpp_bad_rounded; // 與 ServicePage 相同的危險盾牌
-    } else if (type == 'warn') {
-      themeColor = Colors.amber[800]!;
-      bgColor = Colors.amber[50]!;
-      iconData = Icons.gpp_maybe_rounded; // 與 ServicePage 相同的警告盾牌
-    } else {
-      themeColor = Colors.black;
-      bgColor = Colors.grey[100]!;
-      iconData = Icons.schedule_rounded; // 排程或一般通知
+    // 💡 規則切換：只要是溫度感測為 warn 或 danger -> 顯示為紅色框
+    if (type == 'danger' || type == 'warn') {
+      themeColor = const Color(0xFFD32F2F); // 警報紅
+      bgColor = const Color(0xFFFFEBEE);    // 淡紅背景框
+      iconData = type == 'danger' ? Icons.gpp_bad_rounded : Icons.gpp_maybe_rounded;
+    } 
+    // 💡 規則切換：如果是電器開啟、關閉或一般排程 -> 顯示為藍色框
+    else {
+      themeColor = const Color(0xFF1976D2); // 操作藍
+      bgColor = const Color(0xFFE3F2FD);    // 淡藍背景框
+      iconData = Icons.toggle_on_rounded;   // 電器開關示意圖示
     }
 
     return Dismissible(
@@ -178,17 +176,23 @@ class _NotificationPageState extends State<NotificationPage> {
       onDismissed: (direction) {
         FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
       },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16.0),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6.0),
+        padding: const EdgeInsets.all(14.0),
+        decoration: BoxDecoration(
+          color: bgColor, // 根據類型決定是淡紅還是淡藍
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: themeColor.withOpacity(0.3), width: 1),
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              backgroundColor: bgColor,
-              radius: 22,
-              child: Icon(iconData, color: themeColor),
+              backgroundColor: Colors.white,
+              radius: 20,
+              child: Icon(iconData, color: themeColor, size: 22),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -199,21 +203,21 @@ class _NotificationPageState extends State<NotificationPage> {
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: themeColor,
+                          color: themeColor, // 標題顏色同步
                         ),
                       ),
                       Text(
                         _formatTime(timeStr),
-                        style: const TextStyle(fontSize: 12, color: Colors.black26),
+                        style: TextStyle(fontSize: 11, color: themeColor.withOpacity(0.6)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
                     content,
-                    style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.4),
+                    style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
                   ),
                 ],
               ),
