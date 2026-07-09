@@ -166,21 +166,47 @@ class _NotificationPageState extends State<NotificationPage> {
 
     return Dismissible(
       key: Key(notificationId),
+      // 💡 限制滑動方向：只允許「從右向左」滑動觸發刪除
       direction: DismissDirection.endToStart,
+      
+      // 💡 當向左滑動時，底下露出的紅色刪除背景
       background: Container(
-        color: Colors.redAccent,
+        margin: const EdgeInsets.symmetric(vertical: 6.0), // 保持與卡片相同的間距
+        decoration: BoxDecoration(
+          color: Colors.redAccent,
+          borderRadius: BorderRadius.circular(14), // 圓角與內層卡片同步
+        ),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
-        child: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            SizedBox(width: 8),
+            Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
+          ],
+        ),
       ),
+      
+      // 💡 證實滑動完成後，執行 Firebase 刪除節點
       onDismissed: (direction) {
-        FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
+        if (_uid != null) {
+          FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
+          
+          // 可選：如果你想在畫面下方跳出 Toast 提示，可以解開以下註解
+          /*
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("已刪除該條通知")),
+          );
+          */
+        }
       },
+      
+      // 內層通知卡片主體
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 6.0),
         padding: const EdgeInsets.all(14.0),
         decoration: BoxDecoration(
-          color: bgColor, // 根據類型決定是淡紅還是淡藍
+          color: bgColor,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: themeColor.withOpacity(0.3), width: 1),
         ),
@@ -205,7 +231,7 @@ class _NotificationPageState extends State<NotificationPage> {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: themeColor, // 標題顏色同步
+                          color: themeColor,
                         ),
                       ),
                       Text(
@@ -227,7 +253,6 @@ class _NotificationPageState extends State<NotificationPage> {
       ),
     );
   }
-
   String _formatTime(String isoTimestamp) {
     if (isoTimestamp.isEmpty) return '';
     try {
