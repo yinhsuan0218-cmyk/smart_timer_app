@@ -11,8 +11,7 @@ import 'dart:async';
 // 宣告一個全域變數，用來儲存訂閱，防止重複登入時重複監聽
 StreamSubscription? _globalTempSubscription;
 
-// 💡 用來記錄全域設備的「上一次開關狀態」，避免重複洗通知
-// 結構為: { "zoneId_deviceId": true/false }
+// 用來記錄全域設備的「上一次開關狀態」，避免重複洗通知
 final Map<String, bool> _lastDeviceStates = {};
 
 void main() async {
@@ -32,7 +31,7 @@ void main() async {
       print("[全域監聽] 使用者未登入或已登出, 關閉監聽並清空快照.");
       _globalTempSubscription?.cancel();
       _globalTempSubscription = null;
-      _lastDeviceStates.clear(); // 清空狀態快照
+      _lastDeviceStates.clear(); 
     }
   });
 
@@ -99,13 +98,26 @@ void startGlobalTemperatureListener(String uid) {
           });
         }
       } else {
+        // 💡 溫度降回安全線：如果之前是危險鎖定狀態（true），現在解鎖並發送安全復原通知
         if (zone['is_danger_triggered'] == true) {
-          await db.ref('users/$uid/zones/$zoneId').update({'is_danger_triggered': false});
           print("✅ 區域【$zoneName】溫度已冷卻降回安全線 (${currentTemp}°C)。");
+          
+          // A. 先解鎖 Firebase 狀態
+          await db.ref('users/$uid/zones/$zoneId').update({'is_danger_triggered': false});
+          
+          // B. 推送安全復原通知到資料庫 (type 設為 'success'，代表安全解除)
+          await db.ref('users/$uid/notifications').push().set({
+            'zoneId': zoneId,
+            'title': '✅ 安全！環境溫度已恢復正常',
+            'content': '區域【$zoneName】環境溫度已冷卻降至 ${currentTemp.toStringAsFixed(1)}°C。目前已解除危險管制，設備可以重新開啟使用。',
+            'timestamp': DateTime.now().toIso8601String(),
+            'type': 'success', // 💡 新增型態
+            'status': 'unread', 
+          });
         }
       }
 
-      // 2. 🔌 設備狀態變更追蹤監聽邏輯 (手動/硬體/排程變更皆適用)
+      // 2. 🔌 設備狀態變更追蹤監聽邏輯
       if (zone['devices'] != null) {
         final devicesMap = Map<dynamic, dynamic>.from(zone['devices'] as Map);
         
@@ -113,21 +125,17 @@ void startGlobalTemperatureListener(String uid) {
           final device = Map<String, dynamic>.from(deviceValue as Map);
           bool currentActive = device['is_active'] ?? false;
           
-          // 使用 區域ID + 設備ID 作為唯快照唯一 Key
           String stateKey = "${zoneId}_$deviceId";
           
-          // 檢查快照內是否存有此設備的上一次狀態
           if (_lastDeviceStates.containsKey(stateKey)) {
             bool? lastActive = _lastDeviceStates[stateKey];
             
-            // 💡 關鍵比對：如果目前的狀態與上一次記錄不同，代表開關被切換了！
             if (lastActive != currentActive) {
               String statusText = currentActive ? "開啟" : "關閉";
               String emoji = currentActive ? "🟢" : "🔴";
               
               print("💡 [全域通知] 設備狀態變更偵測：$zoneName -> $deviceId 變更為 $statusText");
               
-              // 推送開關變更通知紀錄到 Firebase 資料庫
               await db.ref('users/$uid/notifications').push().set({
                 'zoneId': zoneId,
                 'deviceId': deviceId,
@@ -140,7 +148,6 @@ void startGlobalTemperatureListener(String uid) {
             }
           }
           
-          // 更新或初始化該設備的狀態快照
           _lastDeviceStates[stateKey] = currentActive;
         });
       }
