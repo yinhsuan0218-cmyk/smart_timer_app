@@ -71,11 +71,20 @@ void startGlobalTemperatureListener(String uid) {
       // 1. 🌡️ 溫度防護與自動斷電核心邏輯
       double currentTemp = double.tryParse(zone['temperature']?.toString() ?? '0.0') ?? 0.0;
 
+      // 取得目前的狀態旗標（預設為 false）
+      bool isDangerTriggered = zone['is_danger_triggered'] ?? false;
+      bool isWarmTriggered = zone['is_warm_triggered'] ?? false;
+
+      // --- 狀況 A：高於或等於 80.0°C (Danger 嚴重警報 + 斷電) ---
       if (currentTemp >= 80.0) {
-        bool isAlreadyShutdown = zone['is_danger_triggered'] ?? false;
-        if (!isAlreadyShutdown) {
+        if (!isDangerTriggered) {
           print("🚨 警報！區域【$zoneName】過熱 (${currentTemp}°C)，啟動緊急斷電！");
-          await db.ref('users/$uid/zones/$zoneId').update({'is_danger_triggered': true});
+          
+          // 標記 Danger 觸發
+          await db.ref('users/$uid/zones/$zoneId').update({
+            'is_danger_triggered': true,
+            'is_warm_triggered': false, // 升級為 Danger 時，清除 Warm 標記
+          });
           
           final devicesRef = db.ref('users/$uid/zones/$zoneId/devices');
           final devicesSnapshot = await devicesRef.get();
@@ -97,21 +106,46 @@ void startGlobalTemperatureListener(String uid) {
             'status': 'unread', 
           });
         }
-      } else {
-        // 💡 溫度降回安全線：如果之前是危險鎖定狀態（true），現在解鎖並發送安全復原通知
-        if (zone['is_danger_triggered'] == true) {
+      } 
+      // --- 狀況 B：介於 60.0°C 至 80.0°C 之間 (Warm 警告，僅提醒不中斷電源) ---
+      else if (currentTemp >= 60.0 && currentTemp < 80.0) {
+        if (!isWarmTriggered) {
+          print("⚠️ 警告！區域【$zoneName】溫度偏高 (${currentTemp}°C)，發送黃色預警。");
+          
+          // 標記 Warm 觸發，並確保 Danger 旗標為 false
+          await db.ref('users/$uid/zones/$zoneId').update({
+            'is_warm_triggered': true,
+            'is_danger_triggered': false,
+          });
+
+          await db.ref('users/$uid/notifications').push().set({
+            'zoneId': zoneId,
+            'title': '⚠️ 警告！溫度異常偏高',
+            'content': '區域【$zoneName】環境溫度已達 ${currentTemp.toStringAsFixed(1)}°C。請留意高負載電器使用狀況。',
+            'timestamp': DateTime.now().toIso8601String(),
+            'type': 'warn', // 💡 觸發黃色預警
+            'status': 'unread', 
+          });
+        }
+      } 
+      // --- 狀況 C：降至 60.0°C 以下 (安全範圍，發布復原通知) ---
+      else {
+        // 如果先前不論是 Warm 還是 Danger，只要當前降到 60°C 以下即回歸安全線
+        if (isDangerTriggered || isWarmTriggered) {
           print("✅ 區域【$zoneName】溫度已冷卻降回安全線 (${currentTemp}°C)。");
           
-          // A. 先解鎖 Firebase 狀態
-          await db.ref('users/$uid/zones/$zoneId').update({'is_danger_triggered': false});
+          // 解除所有溫度警報狀態旗標
+          await db.ref('users/$uid/zones/$zoneId').update({
+            'is_danger_triggered': false,
+            'is_warm_triggered': false,
+          });
           
-          // B. 推送安全復原通知到資料庫 (type 設為 'success'，代表安全解除)
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
             'title': '✅ 安全！環境溫度已恢復正常',
             'content': '區域【$zoneName】環境溫度已冷卻降至 ${currentTemp.toStringAsFixed(1)}°C。目前已解除危險管制，設備可以重新開啟使用。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'success', // 💡 新增型態
+            'type': 'success', 
             'status': 'unread', 
           });
         }
