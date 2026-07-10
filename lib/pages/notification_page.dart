@@ -205,18 +205,20 @@ class _NotificationPageState extends State<NotificationPage> {
 
     // 在 notification_page.dart 的 _buildNotificationItem 內加入 success 分支：
 
-    if (type == 'danger' || type == 'warn') {
+    // 💡 調整：讓紅色(danger)跟橘黃色(warn)卡片區分開來！
+    if (type == 'danger') {
       themeColor = const Color(0xFFD32F2F); // 警報紅
-      bgColor = status == 'read' ? const Color(0xFFFFF8F8) : const Color(0xFFFFEBEE);
-      iconData = type == 'danger' ? Icons.gpp_bad_rounded : Icons.gpp_maybe_rounded;
-    } 
-    // 💡 新增：如果是溫度安全復原，渲染成健康綠色卡片
-    else if (type == 'success') {
+      bgColor = status == 'read' ? const Color(0xFFFFF8F8) : const Color(0xFFFFEBEE); // 淡紅背景
+      iconData = Icons.gpp_bad_rounded;
+    } else if (type == 'warn') {
+      themeColor = const Color(0xFFE65100); // 警告橘/深黃
+      bgColor = status == 'read' ? const Color(0xFFFFFDE7) : const Color(0xFFFFF3E0); // 淡橙/淡黃背景
+      iconData = Icons.gpp_maybe_rounded;
+    } else if (type == 'success') {
       themeColor = const Color(0xFF2E7D32); // 安全綠
-      bgColor = status == 'read' ? const Color(0xFFF4F9F4) : const Color(0xFFE8F5E9); // 淡綠背景
-      iconData = Icons.gpp_good_rounded;   // 安全護盾盾牌
-    } 
-    else {
+      bgColor = status == 'read' ? const Color(0xFFF4F9F4) : const Color(0xFFE8F5E9); 
+      iconData = Icons.gpp_good_rounded;   
+    } else {
       themeColor = const Color(0xFF1976D2); // 操作藍
       bgColor = status == 'read' ? const Color(0xFFF5F9FD) : const Color(0xFFE3F2FD);
       iconData = Icons.toggle_on_rounded; 
@@ -251,7 +253,7 @@ class _NotificationPageState extends State<NotificationPage> {
       // 💡 關鍵優化：加上 InkWell 或 GestureDetector 讓整張卡片可以被點擊
       child: InkWell(
         onTap: () {
-          if (type == 'danger' || type == 'warn') {
+          if (type == 'danger') {
             // 如果是溫度警報，跳出暗紅色警告視窗
             _showDangerDialog(
               notificationId: notificationId,
