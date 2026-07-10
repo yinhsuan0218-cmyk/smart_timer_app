@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ★ 確保有引入 Auth
+import 'package:firebase_auth/firebase_auth.dart'; 
 import 'service_page.dart';
 
 class ZonePage extends StatefulWidget {
@@ -11,21 +11,17 @@ class ZonePage extends StatefulWidget {
 }
 
 class _ZonePageState extends State<ZonePage> {
-  // ★ 改成 late，讓我們在 initState 裡面再給它確切的路徑
   late DatabaseReference _zonesRef;
   String? uid;
 
   @override
   void initState() {
     super.initState();
-    // ★ 抓取現在登入使用者的 UID
     uid = FirebaseAuth.instance.currentUser?.uid;
     
-    // ★ 設定專屬路徑：如果抓得到 UID，就存到他專屬的資料夾
     if (uid != null) {
       _zonesRef = FirebaseDatabase.instance.ref('users/$uid/zones');
     } else {
-      // 防呆：萬一沒登入狀態，先給個預設路徑避免報錯
       _zonesRef = FirebaseDatabase.instance.ref('zones');
     }
   }
@@ -34,11 +30,12 @@ class _ZonePageState extends State<ZonePage> {
   void addZone() {
     final TextEditingController nameController = TextEditingController();
     
-    // 建立一個獨立的提交方法，讓按鈕和 Enter 鍵都能共用
     void submit() {
       if (nameController.text.isNotEmpty) {
+        // 💡 這裡在建立節點時，同時塞入預設的溫度數值
         _zonesRef.push().set({
           'name': nameController.text.trim(),
+          'temperature': 0.0, // ESP32 或感測器尚未回傳前的初始溫度
         });
         Navigator.pop(context);
       }
@@ -47,18 +44,20 @@ class _ZonePageState extends State<ZonePage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('新增區域'),
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('新增區域', style: TextStyle(fontWeight: FontWeight.bold)),
         content: TextField(
           controller: nameController,
-          textInputAction: TextInputAction.done, // 讓軟體鍵盤的右下角顯示「完成」或「確認」圖示
-          onSubmitted: (_) => submit(),         // ★ 精髓：按下 Enter 鍵時觸發
-          decoration: const InputDecoration(labelText: '區域名稱', hintText: '例如：客廳、主臥室'),
+          textInputAction: TextInputAction.done, 
+          onSubmitted: (_) => submit(),         
+          decoration: const InputDecoration(labelText: '区域名稱', hintText: '例如：客廳、主臥室'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
           TextButton(
-            onPressed: submit, // 共用同一個提交邏輯
-            child: const Text('新增'),
+            onPressed: submit, 
+            child: const Text('新增', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -86,7 +85,7 @@ class _ZonePageState extends State<ZonePage> {
                   stream: _zonesRef.onValue,
                   builder: (context, snapshot) {
                     if (snapshot.hasError) return const Center(child: Text("連線錯誤"));
-                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.black));
 
                     List<Map<String, dynamic>> zoneList = [];
                     if (snapshot.hasData && snapshot.data!.snapshot.value != null) {
@@ -99,7 +98,7 @@ class _ZonePageState extends State<ZonePage> {
                     }
 
                     if (zoneList.isEmpty) {
-                      return const Center(child: Text("還沒有建立區域，按右下角新增"));
+                      return const Center(child: Text("還沒有建立區域，按右下角新增", style: TextStyle(color: Colors.grey)));
                     }
 
                     return ListView.builder(
@@ -120,9 +119,11 @@ class _ZonePageState extends State<ZonePage> {
             bottom: 30, right: 24,
             child: FloatingActionButton.extended(
               onPressed: addZone,
-              label: const Text('新增區域'),
-              icon: const Icon(Icons.add_location_alt),
+              label: const Text('新增區域', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.add_location_alt, color: Colors.black),
               backgroundColor: Colors.white,
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
           ),
         ],
@@ -134,6 +135,9 @@ class _ZonePageState extends State<ZonePage> {
   Widget _buildZoneItem(Map<String, dynamic> zone) {
     String name = zone['name'] ?? '未命名';
     String id = zone['id'];
+    
+    // 💡 修正後的安全寫法：防止舊資料缺少 temperature 欄位導致崩潰
+    double temp = double.tryParse(zone['temperature']?.toString() ?? '0.0') ?? 0.0;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
@@ -166,7 +170,6 @@ class _ZonePageState extends State<ZonePage> {
           child: const Icon(Icons.delete, color: Colors.red),
         ),
         child: GestureDetector(
-          // 建議修改後的 onTap（增加 uid 傳遞）
           onTap: () {
             Navigator.push(
               context, 
@@ -174,7 +177,7 @@ class _ZonePageState extends State<ZonePage> {
                 builder: (_) => ServicePage(
                   zoneId: id, 
                   zoneName: name,
-                  mqttTopic: 'users/$uid/zones/$id/commands', // 預先構建好 MQTT 主題
+                  mqttTopic: 'users/$uid/zones/$id/commands', 
                 )
               )
             );
@@ -202,7 +205,7 @@ class _ZonePageState extends State<ZonePage> {
                 name, 
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)
               ),
-              subtitle: const Text("點擊管理裝置", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              subtitle: Text("目前溫度: $temp°C", style: TextStyle(fontSize: 13, color: Colors.grey[600])),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
             ),
           ),
