@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'service_page.dart';
 class NotificationPage extends StatefulWidget {
   const NotificationPage({super.key});
 
@@ -203,14 +203,21 @@ class _NotificationPageState extends State<NotificationPage> {
     Color bgColor;
     IconData iconData;
 
-    // 判斷是否為溫度異常
+    // 在 notification_page.dart 的 _buildNotificationItem 內加入 success 分支：
+
     if (type == 'danger' || type == 'warn') {
-      themeColor = const Color(0xFFD32F2F); 
-      // 💡 視覺優化：若已經確認已讀，背景調淡，增加區別
+      themeColor = const Color(0xFFD32F2F); // 警報紅
       bgColor = status == 'read' ? const Color(0xFFFFF8F8) : const Color(0xFFFFEBEE);
       iconData = type == 'danger' ? Icons.gpp_bad_rounded : Icons.gpp_maybe_rounded;
-    } else {
-      themeColor = const Color(0xFF1976D2); 
+    } 
+    // 💡 新增：如果是溫度安全復原，渲染成健康綠色卡片
+    else if (type == 'success') {
+      themeColor = const Color(0xFF2E7D32); // 安全綠
+      bgColor = status == 'read' ? const Color(0xFFF4F9F4) : const Color(0xFFE8F5E9); // 淡綠背景
+      iconData = Icons.gpp_good_rounded;   // 安全護盾盾牌
+    } 
+    else {
+      themeColor = const Color(0xFF1976D2); // 操作藍
       bgColor = status == 'read' ? const Color(0xFFF5F9FD) : const Color(0xFFE3F2FD);
       iconData = Icons.toggle_on_rounded; 
     }
