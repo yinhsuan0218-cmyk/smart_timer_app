@@ -66,16 +66,19 @@ class _NotificationPageState extends State<NotificationPage> {
     required String notificationId,
     required String zoneName,
     required String content,
+    required String temperature,
   }) {
     if (!mounted) return;
 
     // 從原本寫入的 content 字串中動態解出溫度（例如: "...已達 82.5°C..." -> 抓出 82.5）
+    /***
     String tempStr = "80.0"; 
     final RegExp regExp = RegExp(r'已達\s*([0-9.]+)\s*°C');
     final match = regExp.firstMatch(content);
     if (match != null) {
       tempStr = match.group(1) ?? "80.0";
     }
+    ***/
 
     showDialog(
       context: context,
@@ -91,7 +94,7 @@ class _NotificationPageState extends State<NotificationPage> {
           ],
         ),
         content: Text(
-          '目前區域【$zoneName】環境溫度已達 $tempStr°C（已超過安全上限 80.0°C）。\n\n⚠️ 系統已強制切斷該區域內所有高負載裝置電源！',
+          '目前區域【$zoneName】環境溫度已達 $temperature°C（已超過安全上限 80.0°C）。\n\n⚠️ 系統已強制切斷該區域內所有高負載裝置電源！\n\n系統紀錄：$content',
           style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
         ),
         actions: [
@@ -162,6 +165,8 @@ class _NotificationPageState extends State<NotificationPage> {
                     final String timeStr = item['timestamp'] ?? '';
                     final String type = item['type'] ?? 'info'; 
                     final String status = item['status'] ?? 'unread';
+                    final String zoneName = item['zone_name'] ?? '特定區域'; 
+                    final String temperature = item['temperature']?.toString() ?? '未知';
 
                     return _buildNotificationItem(
                       notificationId: notificationId,
@@ -170,6 +175,8 @@ class _NotificationPageState extends State<NotificationPage> {
                       timeStr: timeStr,
                       type: type,
                       status: status,
+                      zoneName: zoneName,
+                      temperature: temperature,
                     );
                   },
                 );
@@ -198,6 +205,8 @@ class _NotificationPageState extends State<NotificationPage> {
     required String timeStr,
     required String type,
     required String status,
+    required String zoneName,
+    required String temperature,
   }) {
     Color themeColor;
     Color bgColor;
@@ -225,12 +234,14 @@ class _NotificationPageState extends State<NotificationPage> {
     }
 
     // 嘗試從文字解析出 zoneName（假設格式為 區域【XXX】）
+    /***
     String zoneName = '特定區域';
     final RegExp zoneExp = RegExp(r'區域【(.*?)】');
     final zoneMatch = zoneExp.firstMatch(content);
     if (zoneMatch != null) {
       zoneName = zoneMatch.group(1) ?? '特定區域';
     }
+    ***/
 
     return Dismissible(
       key: Key(notificationId),
@@ -259,6 +270,7 @@ class _NotificationPageState extends State<NotificationPage> {
               notificationId: notificationId,
               zoneName: zoneName,
               content: content,
+              temperature: temperature,
             );
           } else {
             // 一般電器通知點擊，直接轉為已讀
