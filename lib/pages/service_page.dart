@@ -104,54 +104,33 @@ class _ServicePageState extends State<ServicePage> {
     });
   }
 
-  // 執行危險狀態：全關 + 跳出通知警告 + ★ 寫入資料庫通知紀錄
+  // 執行危險狀態：全關 + 寫入資料庫通知紀錄 (帶有 uniqueID 方便後續刪除)
   Future<void> _executeEmergencyShutdown() async {
     // 1. 抓取當前所有裝置，將它們全數關閉
     final snapshot = await _devicesRef.get();
     if (snapshot.exists && snapshot.value != null) {
       final data = snapshot.value as Map<dynamic, dynamic>;
       data.forEach((deviceId, value) {
-        // 更新 Firebase
         _devicesRef.child(deviceId).update({'is_active': false});
-        // 發送 MQTT 實體斷電指令
         _mqttService.publishCommand(widget.mqttTopic, "$deviceId:OFF");
       });
     }
 
-    // ★ 關鍵修改：將過熱自動斷電紀錄永久保留至資料庫通知中
-    _pushNotification(
-      title: '🚨 危險！溫度過高自動斷電',
-      content: '區域【${widget.zoneName}】目前環境溫度已達 ${_currentTemperature.toStringAsFixed(1)}°C，高於危險門檻 $tempDangerMin°C。系統已強制關閉該區域內所有高負載裝置！',
-      type: 'danger',
-    );
+    if (uid == null) return;
+    
+    // 建立新通知節點
+    final notificationRef = FirebaseDatabase.instance.ref('users/$uid/notifications').push();
+    final String notificationId = notificationRef.key ?? ''; // 💡 拿到這條通知的 ID
 
-    // 2. 畫面上彈出最嚴厲的暗紅色 Danger 警告視窗
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false, // 強制使用者一定要按確認
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF8B0000), // 暗紅色背景
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
-            SizedBox(width: 8),
-            Text('危險！溫度過高', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Text(
-          '目前環境溫度已達 ${_currentTemperature.toStringAsFixed(1)}°C（超過危險值 $tempDangerMin°C）。\n系統已啟動安全保護：\n⚠️ 已自動關閉該區域內所有高負載裝置！',
-          style: const TextStyle(color: Colors.white70, fontSize: 15),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('收到警告', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
+    await notificationRef.set({
+      'title': '🚨 危險！溫度過高自動斷電',
+      'content': '區域【${widget.zoneName}】目前環境溫度已達 ${_currentTemperature.toStringAsFixed(1)}°C。系統已強制關閉所有高負載裝置！',
+      'timestamp': DateTime.now().toIso8601String(),
+      'type': 'danger',
+      'status': 'unread', 
+    });
+
+    
   }
 
   // 處理開關切換並發送 MQTT + ★ 寫入資料庫通知紀錄
