@@ -33,7 +33,7 @@ class _ServicePageState extends State<ServicePage> {
   static const double tempDangerMin = 80.0; // c
 
   // 內部狀態變數
-  double _currentTemperature = 25.0; // 預設初始溫度
+  double _currentTemperature = 70.0; // 預設初始溫度
   bool _isDangerTriggered = false;   // 避免危險狀態重複觸發自動斷電
   @override
   void initState() {
@@ -57,14 +57,22 @@ class _ServicePageState extends State<ServicePage> {
   void _listenToTemperature() {
     _zoneRef.child('temperature').onValue.listen((event) {
       if (event.snapshot.value != null) {
-        final double? temp = double.tryParse(event.snapshot.value.toString());
-        if (temp != null) {
-          setState(() {
-            _currentTemperature = temp;
-          });
-          // 檢查是否觸發 Danger 警報機制
-          _checkSafetyMechanism(temp);
+        String rawValue = event.snapshot.value.toString().trim();
+        
+        double temp;
+        // 💡 防呆機制：如果是空字串或無法解析，則給予預設值 0.0
+        if (rawValue.isEmpty) {
+          temp = 0.0; 
+        } else {
+          temp = double.tryParse(rawValue) ?? 0.0;
         }
+
+        setState(() {
+          _currentTemperature = temp;
+        });
+        
+        // 檢查是否觸發 Danger 警報機制
+        _checkSafetyMechanism(temp);
       }
     });
   }
@@ -81,7 +89,22 @@ class _ServicePageState extends State<ServicePage> {
     }
   }
 
-  // 執行危險狀態：全關 + 跳出通知警告
+  // ★ 新增：統一將通知推送到 Firebase，供 NotificationPage 讀取
+  void _pushNotification({required String title, required String content, required String type}) {
+    if (uid == null) return;
+    
+    // 使用當前時間戳記作為 key，或者用 push() 自動生成唯一 key
+    final notificationRef = FirebaseDatabase.instance.ref('users/$uid/notifications').push();
+    
+    notificationRef.set({
+      'title': title,
+      'content': content,
+      'timestamp': DateTime.now().toIso8601String(), // 儲存 ISO 格式時間
+      'type': type, // 'danger', 'warn', 或 'info'
+    });
+  }
+
+  // 執行危險狀態：全關 + 跳出通知警告 + ★ 寫入資料庫通知紀錄
   Future<void> _executeEmergencyShutdown() async {
     // 1. 抓取當前所有裝置，將它們全數關閉
     final snapshot = await _devicesRef.get();
@@ -94,6 +117,13 @@ class _ServicePageState extends State<ServicePage> {
         _mqttService.publishCommand(widget.mqttTopic, "$deviceId:OFF");
       });
     }
+
+    // ★ 關鍵修改：將過熱自動斷電紀錄永久保留至資料庫通知中
+    _pushNotification(
+      title: '🚨 危險！溫度過高自動斷電',
+      content: '區域【${widget.zoneName}】目前環境溫度已達 ${_currentTemperature.toStringAsFixed(1)}°C，高於危險門檻 $tempDangerMin°C。系統已強制關閉該區域內所有高負載裝置！',
+      type: 'danger',
+    );
 
     // 2. 畫面上彈出最嚴厲的暗紅色 Danger 警告視窗
     if (!mounted) return;
@@ -124,6 +154,26 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 
+  // 處理開關切換並發送 MQTT + ★ 寫入資料庫通知紀錄
+  void _toggleDevice(String deviceId, bool status) {
+    // 1. 更新 Firebase 狀態（讓 UI 跟著動）
+    _devicesRef.child(deviceId).update({'is_active': status});
+
+    // 2. 發送 MQTT 指令到指定的 Topic
+    String command = status ? "ON" : "OFF";
+    _mqttService.publishCommand(widget.mqttTopic, "$deviceId:$command");
+    
+    // ★ 關鍵修改：手動操作開關時，將紀錄同步推送到通知資料庫
+    String statusText = status ? "開啟" : "關閉";
+    _pushNotification(
+      title: '🔌 設備狀態變更',
+      content: '您手動了$statusText【${widget.zoneName}】環境中的設備（ID: $deviceId）。',
+      type: 'info', // 一般操作類型，對應 NotificationPage 的操作藍
+    );
+    
+    print("發送 MQTT 指令到 ${widget.mqttTopic} : $deviceId:$command");
+  }
+
   // 取得當前溫度對應的顏色與文字狀態
   Map<String, dynamic> _getTemperatureStatus(double temp) {
     if (temp >= tempDangerMin) {
@@ -133,22 +183,6 @@ class _ServicePageState extends State<ServicePage> {
     } else {
       return {'text': 'Safe', 'color': Colors.green, 'icon': Icons.gpp_good_rounded};
     }
-  }
-  // ★ 新增：處理開關切換並發送 MQTT
-  void _toggleDevice(String deviceId, bool status) {
-    // 1. 更新 Firebase 狀態（讓 UI 跟著動）
-    _devicesRef.child(deviceId).update({'is_active': status});
-
-    // 2. 發送 MQTT 指令到指定的 Topic
-    // 指令格式建議： "DEVICE_ID:ON" 或 "DEVICE_ID:OFF"
-    String command = status ? "ON" : "OFF";
-    _mqttService.publishCommand(widget.mqttTopic, "$deviceId:$command");
-    
-    print("發送 MQTT 指令到 ${widget.mqttTopic} : $deviceId:$command");
-  }
-  // 輔助函式：時間格式化
-  String _formatDateTime(DateTime dt) {
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   // 新增裝置（加入數量限制邏輯與 Enter 鍵觸發）
