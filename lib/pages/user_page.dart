@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'login_page.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class UserPage extends StatefulWidget {
   const UserPage({super.key});
@@ -88,6 +90,119 @@ class _UserPageState extends State<UserPage> {
         if (mounted) setState(() => _isLoading = false);
       }
     }
+  }
+
+  // --- 配網對話框邏輯 ---
+  Future<void> _showWifiSetupDialog(BuildContext context) async {
+    final TextEditingController ssidController = TextEditingController();
+    final TextEditingController pwdController = TextEditingController();
+    
+    await showDialog(
+      context: context,
+      barrierDismissible: false, 
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            bool isSetupLoading = false;
+
+            Future<void> sendConfig() async {
+              final ssid = ssidController.text.trim();
+              final password = pwdController.text.trim();
+
+              if (ssid.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('⚠️ 請輸入 Wi-Fi 名稱')),
+                );
+                return;
+              }
+
+              setState(() { isSetupLoading = true; });
+
+              try {
+                final url = Uri.parse('http://192.168.4.1/');
+                final response = await http.post(
+                  url,
+                  body: jsonEncode({"ssid": ssid, "password": password}),
+                ).timeout(const Duration(seconds: 5));
+
+                if (response.statusCode == 200) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('✅ 設定成功！設備即將重啟連線...')),
+                    );
+                    Navigator.pop(dialogContext);
+                  }
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('❌ 連線失敗！請確認手機已連上 Smart_Timer_Setup')),
+                  );
+                }
+              } finally {
+                if (context.mounted) {
+                  setState(() { isSetupLoading = false; });
+                }
+              }
+            }
+
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+              title: const Text('設定設備網路', style: TextStyle(fontWeight: FontWeight.bold)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('1.將 Wi-Fi 連線至「Smart_Timer_Setup」\n2.輸入欲連線 Wi-Fi 資訊 (2.4GHz)。', style: TextStyle(color: Colors.grey)),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: ssidController,
+                      decoration: InputDecoration(
+                        labelText: 'Wi-Fi 名稱',
+                        labelStyle: const TextStyle(color: Colors.grey),
+                        prefixIcon: const Icon(Icons.wifi, color: Colors.black),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: Colors.black12)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: Colors.black, width: 1.2)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: pwdController,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: 'Wi-Fi 密碼',
+                        labelStyle: const TextStyle(color: Colors.grey),
+                        prefixIcon: const Icon(Icons.lock, color: Colors.black),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: Colors.black12)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: Colors.black, width: 1.2)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSetupLoading ? null : () => Navigator.pop(dialogContext),
+                  child: const Text('取消', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ),
+                  onPressed: isSetupLoading ? null : sendConfig,
+                  child: isSetupLoading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('確定', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showSuccessDialog() {
@@ -181,6 +296,22 @@ class _UserPageState extends State<UserPage> {
             
             const SizedBox(height: 40),
 
+            //網路按鈕
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: OutlinedButton.icon(
+                onPressed: () => _showWifiSetupDialog(context),
+                icon: const Icon(Icons.router_rounded),
+                label: const Text('設定插座 Wi-Fi', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.blueAccent,
+                  side: const BorderSide(color: Colors.blueAccent, width: 1.2),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             // 更新按鈕
             SizedBox(
               width: double.infinity,
