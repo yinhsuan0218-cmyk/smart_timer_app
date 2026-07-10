@@ -22,7 +22,6 @@ class _NotificationPageState extends State<NotificationPage> {
   void _setupNotificationQuery() {
     _uid = FirebaseAuth.instance.currentUser?.uid;
     if (_uid != null) {
-      // 依照時間戳（key）排序，最新通知顯示在最上方
       _notificationQuery = FirebaseDatabase.instance
           .ref('users/$_uid/notifications')
           .orderByKey();
@@ -62,6 +61,58 @@ class _NotificationPageState extends State<NotificationPage> {
     );
   }
 
+  // 💡 新增：點擊高溫警告通知時彈出的 Danger 對話框
+  void _showDangerDialog({
+    required String notificationId,
+    required String zoneName,
+    required String content,
+  }) {
+    if (!mounted) return;
+
+    // 從原本寫入的 content 字串中動態解出溫度（例如: "...已達 82.5°C..." -> 抓出 82.5）
+    String tempStr = "80.0"; 
+    final RegExp regExp = RegExp(r'已達\s*([0-9.]+)\s*°C');
+    final match = regExp.firstMatch(content);
+    if (match != null) {
+      tempStr = match.group(1) ?? "80.0";
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, 
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF8B0000), // 暗紅色背景
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+            SizedBox(width: 8),
+            Text('危險！溫度過高', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          '目前區域【$zoneName】環境溫度已達 $tempStr°C（已超過安全上限 80.0°C）。\n\n⚠️ 系統已強制切斷該區域內所有高負載裝置電源！',
+          style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              if (notificationId.isNotEmpty && _uid != null) {
+                // 💡 選擇做法 B：更新狀態為已讀（read）
+                // 如果你想直接砍掉改用：await FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
+                await FirebaseDatabase.instance
+                    .ref('users/$_uid/notifications/$notificationId')
+                    .update({'status': 'read'});
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('收到警告並確認安全性', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -95,7 +146,6 @@ class _NotificationPageState extends State<NotificationPage> {
 
                 final Map<dynamic, dynamic> rawData = snapshot.data!.snapshot.value as Map<dynamic, dynamic>;
                 
-                // 轉為 List 並反轉（讓最新通知在最上面）
                 final List<MapEntry<dynamic, dynamic>> sortedList = rawData.entries.toList()
                   ..sort((a, b) => b.key.compareTo(a.key));
 
@@ -111,6 +161,7 @@ class _NotificationPageState extends State<NotificationPage> {
                     final String content = item['content'] ?? '設備狀態已更新';
                     final String timeStr = item['timestamp'] ?? '';
                     final String type = item['type'] ?? 'info'; 
+                    final String status = item['status'] ?? 'unread';
 
                     return _buildNotificationItem(
                       notificationId: notificationId,
@@ -118,6 +169,7 @@ class _NotificationPageState extends State<NotificationPage> {
                       content: content,
                       timeStr: timeStr,
                       type: type,
+                      status: status,
                     );
                   },
                 );
@@ -139,120 +191,149 @@ class _NotificationPageState extends State<NotificationPage> {
     );
   }
 
-  // 根據電器操作（藍色）與溫度異常（紅色）渲染不同的卡片 UI
   Widget _buildNotificationItem({
     required String notificationId,
     required String title,
     required String content,
     required String timeStr,
     required String type,
+    required String status,
   }) {
     Color themeColor;
     Color bgColor;
     IconData iconData;
 
-    // 💡 規則切換：只要是溫度感測為 warn 或 danger -> 顯示為紅色框
+    // 判斷是否為溫度異常
     if (type == 'danger' || type == 'warn') {
-      themeColor = const Color(0xFFD32F2F); // 警報紅
-      bgColor = const Color(0xFFFFEBEE);    // 淡紅背景框
+      themeColor = const Color(0xFFD32F2F); 
+      // 💡 視覺優化：若已經確認已讀，背景調淡，增加區別
+      bgColor = status == 'read' ? const Color(0xFFFFF8F8) : const Color(0xFFFFEBEE);
       iconData = type == 'danger' ? Icons.gpp_bad_rounded : Icons.gpp_maybe_rounded;
-    } 
-    // 💡 規則切換：如果是電器開啟、關閉或一般排程 -> 顯示為藍色框
-    else {
-      themeColor = const Color(0xFF1976D2); // 操作藍
-      bgColor = const Color(0xFFE3F2FD);    // 淡藍背景框
-      iconData = Icons.toggle_on_rounded;   // 電器開關示意圖示
+    } else {
+      themeColor = const Color(0xFF1976D2); 
+      bgColor = status == 'read' ? const Color(0xFFF5F9FD) : const Color(0xFFE3F2FD);
+      iconData = Icons.toggle_on_rounded; 
+    }
+
+    // 嘗試從文字解析出 zoneName（假設格式為 區域【XXX】）
+    String zoneName = '特定區域';
+    final RegExp zoneExp = RegExp(r'區域【(.*?)】');
+    final zoneMatch = zoneExp.firstMatch(content);
+    if (zoneMatch != null) {
+      zoneName = zoneMatch.group(1) ?? '特定區域';
     }
 
     return Dismissible(
       key: Key(notificationId),
-      // 💡 限制滑動方向：只允許「從右向左」滑動觸發刪除
       direction: DismissDirection.endToStart,
-      
-      // 💡 當向左滑動時，底下露出的紅色刪除背景
       background: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6.0), // 保持與卡片相同的間距
+        margin: const EdgeInsets.symmetric(vertical: 6.0),
         decoration: BoxDecoration(
           color: Colors.redAccent,
-          borderRadius: BorderRadius.circular(14), // 圓角與內層卡片同步
+          borderRadius: BorderRadius.circular(14),
         ),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            SizedBox(width: 8),
-            Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
-          ],
-        ),
+        child: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
       ),
-      
-      // 💡 證實滑動完成後，執行 Firebase 刪除節點
       onDismissed: (direction) {
         if (_uid != null) {
           FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
-          
-          // 可選：如果你想在畫面下方跳出 Toast 提示，可以解開以下註解
-          /*
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("已刪除該條通知")),
-          );
-          */
         }
       },
-      
-      // 內層通知卡片主體
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6.0),
-        padding: const EdgeInsets.all(14.0),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: themeColor.withOpacity(0.3), width: 1),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              backgroundColor: Colors.white,
-              radius: 20,
-              child: Icon(iconData, color: themeColor, size: 22),
+      // 💡 關鍵優化：加上 InkWell 或 GestureDetector 讓整張卡片可以被點擊
+      child: InkWell(
+        onTap: () {
+          if (type == 'danger' || type == 'warn') {
+            // 如果是溫度警報，跳出暗紅色警告視窗
+            _showDangerDialog(
+              notificationId: notificationId,
+              zoneName: zoneName,
+              content: content,
+            );
+          } else {
+            // 一般電器通知點擊，直接轉為已讀
+            if (_uid != null && status == 'unread') {
+              FirebaseDatabase.instance
+                  .ref('users/$_uid/notifications/$notificationId')
+                  .update({'status': 'read'});
+            }
+          }
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6.0),
+          padding: const EdgeInsets.all(14.0),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              // 💡 視覺優化：已讀的卡片邊框半透明化，凸顯未讀通知
+              color: themeColor.withOpacity(status == 'read' ? 0.1 : 0.3), 
+              width: status == 'read' ? 0.8 : 1.2,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: themeColor,
-                        ),
-                      ),
-                      Text(
-                        _formatTime(timeStr),
-                        style: TextStyle(fontSize: 11, color: themeColor.withOpacity(0.6)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    content,
-                    style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
-                  ),
-                ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.white,
+                radius: 20,
+                child: Icon(iconData, color: themeColor, size: 22),
               ),
-            ),
-          ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: themeColor,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            // 💡 亮點小貼紙：若是未讀，加一個「未確認」的小紅點標籤
+                            if (status == 'unread' && (type == 'danger' || type == 'warn'))
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
+                                child: const Text("未確認", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                              ),
+                          ],
+                        ),
+                        Text(
+                          _formatTime(timeStr),
+                          style: TextStyle(fontSize: 11, color: themeColor.withOpacity(0.6)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      content,
+                      style: TextStyle(
+                        fontSize: 13, 
+                        color: status == 'read' ? Colors.black45 : Colors.black87, // 已讀字體變淡
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+
   String _formatTime(String isoTimestamp) {
     if (isoTimestamp.isEmpty) return '';
     try {
