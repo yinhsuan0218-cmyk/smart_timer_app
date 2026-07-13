@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'service_page.dart';
+
 class NotificationPage extends StatefulWidget {
   const NotificationPage({super.key});
 
@@ -61,7 +62,7 @@ class _NotificationPageState extends State<NotificationPage> {
     );
   }
 
-  // 💡 新增：點擊高溫警告通知時彈出的 Danger 對話框
+  // 點擊高溫嚴重警告通知時彈出的 Danger 對話框
   void _showDangerDialog({
     required String notificationId,
     required String zoneName,
@@ -69,16 +70,6 @@ class _NotificationPageState extends State<NotificationPage> {
     required String temperature,
   }) {
     if (!mounted) return;
-
-    // 從原本寫入的 content 字串中動態解出溫度（例如: "...已達 82.5°C..." -> 抓出 82.5）
-    /***
-    String tempStr = "80.0"; 
-    final RegExp regExp = RegExp(r'已達\s*([0-9.]+)\s*°C');
-    final match = regExp.firstMatch(content);
-    if (match != null) {
-      tempStr = match.group(1) ?? "80.0";
-    }
-    ***/
 
     showDialog(
       context: context,
@@ -101,8 +92,6 @@ class _NotificationPageState extends State<NotificationPage> {
           TextButton(
             onPressed: () async {
               if (notificationId.isNotEmpty && _uid != null) {
-                // 💡 選擇做法 B：更新狀態為已讀（read）
-                // 如果你想直接砍掉改用：await FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
                 await FirebaseDatabase.instance
                     .ref('users/$_uid/notifications/$notificationId')
                     .update({'status': 'read'});
@@ -212,36 +201,25 @@ class _NotificationPageState extends State<NotificationPage> {
     Color bgColor;
     IconData iconData;
 
-    // 在 notification_page.dart 的 _buildNotificationItem 內加入 success 分支：
-
-    // 💡 調整：讓紅色(danger)跟橘黃色(warn)卡片區分開來！
     if (type == 'danger') {
       themeColor = const Color(0xFFD32F2F); // 警報紅
-      bgColor = status == 'read' ? const Color(0xFFFFF8F8) : const Color(0xFFFFEBEE); // 淡紅背景
+      bgColor = status == 'read' ? const Color(0xFFFFF8F8) : const Color(0xFFFFEBEE); 
       iconData = Icons.gpp_bad_rounded;
     } else if (type == 'warn') {
-      themeColor = const Color(0xFFE65100); // 警告橘/深黃
-      bgColor = status == 'read' ? const Color(0xFFFFFDE7) : const Color(0xFFFFF3E0); // 淡橙/淡黃背景
-      iconData = Icons.gpp_maybe_rounded;
+      // 🔌 耗電異常：顯示黃色/橘色
+      themeColor = const Color(0xFFE65100); // 警告橘深黃
+      bgColor = status == 'read' ? const Color(0xFFFFFDE7) : const Color(0xFFFFF3E0); 
+      iconData = Icons.offline_bolt_rounded; // 更換為更貼切的電力圖示
     } else if (type == 'success') {
+      // 🌱 耗電/環境恢復正常：顯示安全綠
       themeColor = const Color(0xFF2E7D32); // 安全綠
       bgColor = status == 'read' ? const Color(0xFFF4F9F4) : const Color(0xFFE8F5E9); 
       iconData = Icons.gpp_good_rounded;   
     } else {
-      themeColor = const Color(0xFF1976D2); // 操作藍
+      themeColor = const Color(0xFF1976D2); // 一般操作藍
       bgColor = status == 'read' ? const Color(0xFFF5F9FD) : const Color(0xFFE3F2FD);
       iconData = Icons.toggle_on_rounded; 
     }
-
-    // 嘗試從文字解析出 zoneName（假設格式為 區域【XXX】）
-    /***
-    String zoneName = '特定區域';
-    final RegExp zoneExp = RegExp(r'區域【(.*?)】');
-    final zoneMatch = zoneExp.firstMatch(content);
-    if (zoneMatch != null) {
-      zoneName = zoneMatch.group(1) ?? '特定區域';
-    }
-    ***/
 
     return Dismissible(
       key: Key(notificationId),
@@ -261,11 +239,9 @@ class _NotificationPageState extends State<NotificationPage> {
           FirebaseDatabase.instance.ref('users/$_uid/notifications/$notificationId').remove();
         }
       },
-      // 💡 關鍵優化：加上 InkWell 或 GestureDetector 讓整張卡片可以被點擊
       child: InkWell(
         onTap: () {
           if (type == 'danger') {
-            // 如果是溫度警報，跳出暗紅色警告視窗
             _showDangerDialog(
               notificationId: notificationId,
               zoneName: zoneName,
@@ -273,7 +249,7 @@ class _NotificationPageState extends State<NotificationPage> {
               temperature: temperature,
             );
           } else {
-            // 一般電器通知點擊，直接轉為已讀
+            // 一般電器通知、耗電警告(warn)與恢復(success)點擊，直接轉為已讀
             if (_uid != null && status == 'unread') {
               FirebaseDatabase.instance
                   .ref('users/$_uid/notifications/$notificationId')
@@ -289,7 +265,6 @@ class _NotificationPageState extends State<NotificationPage> {
             color: bgColor,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              // 💡 視覺優化：已讀的卡片邊框半透明化，凸顯未讀通知
               color: themeColor.withOpacity(status == 'read' ? 0.1 : 0.3), 
               width: status == 'read' ? 0.8 : 1.2,
             ),
@@ -310,25 +285,29 @@ class _NotificationPageState extends State<NotificationPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            Text(
-                              title,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: themeColor,
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  title,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: themeColor,
+                                  ),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            // 💡 亮點小貼紙：若是未讀，加一個「未確認」的小紅點標籤
-                            if (status == 'unread' && (type == 'danger' || type == 'warn'))
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
-                                child: const Text("未確認", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-                              ),
-                          ],
+                              const SizedBox(width: 6),
+                              if (status == 'unread' && (type == 'danger' || type == 'warn'))
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
+                                  child: const Text("未確認", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                                ),
+                            ],
+                          ),
                         ),
                         Text(
                           _formatTime(timeStr),
@@ -341,7 +320,7 @@ class _NotificationPageState extends State<NotificationPage> {
                       content,
                       style: TextStyle(
                         fontSize: 13, 
-                        color: status == 'read' ? Colors.black45 : Colors.black87, // 已讀字體變淡
+                        color: status == 'read' ? Colors.black45 : Colors.black87, 
                         height: 1.4,
                       ),
                     ),
