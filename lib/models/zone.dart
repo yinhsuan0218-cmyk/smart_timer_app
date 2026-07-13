@@ -2,11 +2,13 @@ class Zone {
   String id;
   String name;
   double temperature;
+  String power;
 
   Zone({
     required this.id, 
     required this.name, 
     this.temperature = 0.0,
+    this.power = 'safe',
   });
 
   // 從 Firebase 的 Map 資料中解析並建立 Zone 物件
