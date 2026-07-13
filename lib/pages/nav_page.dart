@@ -82,24 +82,43 @@ class _NavPageState extends State<NavPage> {
     }
   }
 
+  // 修改後的檢查邏輯
   Future<void> _checkFirstTime() async {
+    // 取得當前登入使用者的 uid
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) return; // 如果沒登入就先不處理
+
     final prefs = await SharedPreferences.getInstance();
-    bool hasSeenTutorial = prefs.getBool('hasSeenTutorial') ?? false;
+    
+    // ★ 關鍵：將 Key 綁定 UID（例如：hasSeenTutorial_user123）
+    // 這樣才能確保「這個帳號」在這台手機上是第一次登入
+    String tutorialKey = 'hasSeenTutorial_$currentUid';
+    bool hasSeenTutorial = prefs.getBool(tutorialKey) ?? false;
 
     if (!hasSeenTutorial) {
-      Future.delayed(const Duration(seconds: 1), () => _showStep1());
-      await prefs.setBool('hasSeenTutorial', true);
+      // 確保畫面已經渲染完成後，再延時彈出對話框
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) {
+          _showStep1(prefs, tutorialKey);
+        }
+      });
     }
   }
 
-  void _showStep1() {
+  // 傳入 prefs 與 key，在使用者點擊確認、真正看完教學時才寫入本地紀錄
+  void _showStep1(SharedPreferences prefs, String tutorialKey) {
     _showTutorialDialog(
       title: "歡迎使用！",
       content: "為了安全，請先前往「User」分頁填寫您的wifi帳號密碼以及電話號碼。",
       buttonText: "前往 User 頁面",
-      onConfirm: () {
-        setState(() => _selectedIndex = 3); 
-        _tutorialStep = 2;
+      onConfirm: () async {
+        setState(() {
+          _selectedIndex = 3; // 切換到 User 頁面
+          _tutorialStep = 2;
+        }); 
+        
+        // ★ 使用者點了按鈕、確定看完後，再正式將狀態改為 true
+        await prefs.setBool(tutorialKey, true);
       },
     );
   }
