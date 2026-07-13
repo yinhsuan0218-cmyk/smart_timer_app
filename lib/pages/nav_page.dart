@@ -19,9 +19,9 @@ class _NavPageState extends State<NavPage> {
   int _selectedIndex = 1;
   int _tutorialStep = 0;
   
-  // ★ 區分為紅、藍兩種類型的未讀計數
-  int _redCount = 0;   // 溫度異常警報數 (danger, warn)
-  int _blueCount = 0;  // 電器操作與排程數 (info)
+  // ★ 調整：區分為紅、綠兩種類型的未讀計數
+  int _redCount = 0;     // 其他所有通知（如：警報、電器操作、排程等）
+  int _greenCount = 0;   // 成功/恢復安全通知（type == 'success'）
   
   String? uid;
   DatabaseReference? _notificationRef;
@@ -33,7 +33,7 @@ class _NavPageState extends State<NavPage> {
     _setupNotificationListener(); 
   }
 
-  // ★ 核心邏輯：即時監聽並分類計算紅、藍通知數量
+  // ★ 核心邏輯：監聽 Firebase 並根據 type 進行紅綠分類
   void _setupNotificationListener() {
     uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
@@ -41,62 +41,58 @@ class _NavPageState extends State<NavPage> {
       
       _notificationRef!.onValue.listen((event) {
         if (event.snapshot.value != null) {
-          // 如果使用者目前就停在通知頁面(Index 2)，直接清空計數，不顯示紅藍點
+          // 如果使用者目前就停在通知頁面(Index 2)，直接清空計數，不顯示紅綠點
           if (_selectedIndex == 2) {
             setState(() {
               _redCount = 0;
-              _blueCount = 0;
+              _greenCount = 0;
             });
             return;
           }
 
           final data = event.snapshot.value as Map<dynamic, dynamic>;
           int tempRed = 0;
-          int tempBlue = 0;
+          int tempGreen = 0;
 
-          // 遍歷所有通知，依據 type 歸類
+          // 遍歷所有通知，依據 type 屬性精準歸類
           data.forEach((key, value) {
             if (value != null) {
               final item = Map<String, dynamic>.from(value as Map);
-              final String type = item['type'] ?? 'info';
+              final String type = item['type'] ?? '';
 
-              if (type == 'danger' || type == 'warn') {
-                tempRed++;
+              // 💡 判斷：當 type 為 success 時顯示綠色，其餘皆為紅色
+              if (type == 'success') {
+                tempGreen++; // 🟢 成功、恢復安全
               } else {
-                tempBlue++;
+                tempRed++;   // 🔴 其他通知（危險警報、手動開關、定時排程等）
               }
             }
           });
 
           setState(() {
             _redCount = tempRed;
-            _blueCount = tempBlue;
+            _greenCount = tempGreen;
           });
         } else {
           setState(() {
             _redCount = 0;
-            _blueCount = 0;
+            _greenCount = 0;
           });
         }
       });
     }
   }
 
-  // 修改後的檢查邏輯
+  // 檢查是否是第一次登入的教學邏輯
   Future<void> _checkFirstTime() async {
-    // 取得當前登入使用者的 uid
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid == null) return; // 如果沒登入就先不處理
+    if (currentUid == null) return; 
 
     final prefs = await SharedPreferences.getInstance();
-    
-    // ★ 關鍵：將 Key 綁定 UID（例如：hasSeenTutorial_user123）
-    // 這樣才能確保「這個帳號」在這台手機上是第一次登入
     String tutorialKey = 'hasSeenTutorial_$currentUid';
     bool hasSeenTutorial = prefs.getBool(tutorialKey) ?? false;
 
     if (!hasSeenTutorial) {
-      // 確保畫面已經渲染完成後，再延時彈出對話框
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted) {
           _showStep1(prefs, tutorialKey);
@@ -105,7 +101,6 @@ class _NavPageState extends State<NavPage> {
     }
   }
 
-  // 傳入 prefs 與 key，在使用者點擊確認、真正看完教學時才寫入本地紀錄
   void _showStep1(SharedPreferences prefs, String tutorialKey) {
     _showTutorialDialog(
       title: "歡迎使用！",
@@ -113,11 +108,9 @@ class _NavPageState extends State<NavPage> {
       buttonText: "前往 User 頁面",
       onConfirm: () async {
         setState(() {
-          _selectedIndex = 3; // 切換到 User 頁面
+          _selectedIndex = 3; 
           _tutorialStep = 2;
         }); 
-        
-        // ★ 使用者點了按鈕、確定看完後，再正式將狀態改為 true
         await prefs.setBool(tutorialKey, true);
       },
     );
@@ -157,7 +150,7 @@ class _NavPageState extends State<NavPage> {
     const UserPage(),         
   ];
 
-  // 💡 自訂雙色高質感外掛 Badge 組件
+  // 💡 自訂雙色外掛 Badge 組件
   Widget _buildDualBadgeIcon(IconData iconData) {
     return Stack(
       clipBehavior: Clip.none,
@@ -169,13 +162,13 @@ class _NavPageState extends State<NavPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 🔴 紅色警報點
+              // 🔴 紅色通知點（其他所有通知）
               if (_redCount > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   margin: const EdgeInsets.only(right: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD32F2F),
+                    color: const Color(0xFFD32F2F), // 質感深紅
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
@@ -183,16 +176,16 @@ class _NavPageState extends State<NavPage> {
                     style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                   ),
                 ),
-              // 🔵 藍色操作點
-              if (_blueCount > 0)
+              // 🟢 綠色通知點（type == 'success'）
+              if (_greenCount > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1976D2),
+                    color: const Color(0xFF2E7D32), // 高質感森林綠
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    '$_blueCount',
+                    '$_greenCount',
                     style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -223,7 +216,7 @@ class _NavPageState extends State<NavPage> {
               // ★ 當點擊進入通知頁面時，將所有計數歸零，提示點消失
               if (index == 2) {
                 _redCount = 0;
-                _blueCount = 0;
+                _greenCount = 0;
               }
             });
           },
@@ -246,7 +239,7 @@ class _NavPageState extends State<NavPage> {
               label: 'Home',
             ),
             
-            // 💡 替換為支援雙色未讀標籤的 Notice 按鈕
+            // 💡 支援紅綠雙色未讀標籤的 Notice 按鈕
             BottomNavigationBarItem(
               icon: _buildDualBadgeIcon(Icons.notifications_outlined),
               activeIcon: _buildDualBadgeIcon(Icons.notifications_rounded),
