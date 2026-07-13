@@ -150,41 +150,6 @@ void startGlobalTemperatureListener(String uid) {
           });
         }
       }
-
-      // 2. 🔌 設備狀態變更追蹤監聽邏輯
-      if (zone['devices'] != null) {
-        final devicesMap = Map<dynamic, dynamic>.from(zone['devices'] as Map);
-        
-        devicesMap.forEach((deviceId, deviceValue) async {
-          final device = Map<String, dynamic>.from(deviceValue as Map);
-          bool currentActive = device['is_active'] ?? false;
-          
-          String stateKey = "${zoneId}_$deviceId";
-          
-          if (_lastDeviceStates.containsKey(stateKey)) {
-            bool? lastActive = _lastDeviceStates[stateKey];
-            
-            if (lastActive != currentActive) {
-              String statusText = currentActive ? "開啟" : "關閉";
-              String emoji = currentActive ? "🟢" : "🔴";
-              
-              print("💡 [全域通知] 設備狀態變更偵測：$zoneName -> $deviceId 變更為 $statusText");
-              
-              await db.ref('users/$uid/notifications').push().set({
-                'zoneId': zoneId,
-                'deviceId': deviceId,
-                'title': '$emoji 設備狀態變更',
-                'content': '區域【$zoneName】中的裝置【$deviceId】已被 $statusText。',
-                'timestamp': DateTime.now().toIso8601String(),
-                'type': 'info',
-                'status': 'unread',
-              });
-            }
-          }
-          
-          _lastDeviceStates[stateKey] = currentActive;
-        });
-      }
     }
   });
 }
