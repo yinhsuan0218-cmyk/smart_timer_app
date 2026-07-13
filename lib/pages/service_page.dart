@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ★ 新增：引入 Auth
-import 'schedule_page.dart'; // ★ 確保有這行
-import '../services/mqtt_service.dart'; // ★ 確保路徑正確，引入你的 MQTT 服務
+import 'package:firebase_auth/firebase_auth.dart';
+import 'schedule_page.dart';
+import '../services/mqtt_service.dart';
 import 'dart:math' as math;
-class ServicePage extends StatefulWidget {
-  final String zoneId;   // 知道是哪個區域 (例如 zone_01)
-  final String zoneName; 
-  final String mqttTopic; // ★ 新增：接收來自 ZonePage 的主題// 知道區域名字 (例如 客廳)
 
-  // ★ 修正後的建構函式
+class ServicePage extends StatefulWidget {
+  final String zoneId;   
+  final String zoneName; 
+  final String mqttTopic; 
+
   const ServicePage({
     super.key,
     required this.zoneId,
@@ -24,89 +24,91 @@ class ServicePage extends StatefulWidget {
 class _ServicePageState extends State<ServicePage> {
   late DatabaseReference _devicesRef; 
   late DatabaseReference _zoneRef;
-  String? uid; // ★ 新增用來存 UID
-  final MqttService _mqttService = MqttService(); // ★ 初始化 MQTT 服務
+  String? uid; 
+  final MqttService _mqttService = MqttService(); 
   int _currentDeviceCount = 0;
-  // --- 溫度設定防錯門檻（可依硬體實驗自由調整常數） ---
-  static const double tempSafeMin = 0.0; // a
-  static const double tempWarnMin = 60.0; // b
-  static const double tempDangerMin = 80.0; // c
 
-  // 內部狀態變數
-  double _currentTemperature = 70.0; // 預設初始溫度
-  bool _isDangerTriggered = false;   // 避免危險狀態重複觸發自動斷電
+  static const double tempSafeMin = 0.0; 
+  static const double tempWarnMin = 60.0; 
+  static const double tempDangerMin = 80.0; 
+
+  double _currentTemperature = 70.0; 
+  bool _isDangerTriggered = false;   
+  
+  // 🔌 新增：用來即時儲存該區域的耗電狀態 ('safe' 或 'waste')
+  String _currentPowerState = 'safe';
+
   @override
   void initState() {
     super.initState();
-    // ★ 抓取目前登入使用者的 UID
     uid = FirebaseAuth.instance.currentUser?.uid;
-    // 連接 MQTT Broker
     _mqttService.connect();
-    // ★ 關鍵修改：路徑變成 'users/你的UID/zones/區域ID/devices'
+    
     if (uid != null) {
-    _zoneRef = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}');
-    _devicesRef = _zoneRef.child('devices');
-  } else {
-    _zoneRef = FirebaseDatabase.instance.ref('zones/${widget.zoneId}');
-    _devicesRef = _zoneRef.child('devices');
-  }
-    // 監聽該 Zone 的即時溫度變化
+      _zoneRef = FirebaseDatabase.instance.ref('users/$uid/zones/${widget.zoneId}');
+      _devicesRef = _zoneRef.child('devices');
+    } else {
+      _zoneRef = FirebaseDatabase.instance.ref('zones/${widget.zoneId}');
+      _devicesRef = _zoneRef.child('devices');
+    }
+    
     _listenToTemperature();
+    _listenToPowerState(); // 🔌 監聽耗電狀態
   }
 
+  // 監聽溫度
   void _listenToTemperature() {
     _zoneRef.child('temperature').onValue.listen((event) {
       if (event.snapshot.value != null) {
         String rawValue = event.snapshot.value.toString().trim();
-        
-        double temp;
-        // 💡 防呆機制：如果是空字串或無法解析，則給予預設值 0.0
-        if (rawValue.isEmpty) {
-          temp = 0.0; 
-        } else {
-          temp = double.tryParse(rawValue) ?? 0.0;
-        }
+        double temp = rawValue.isEmpty ? 0.0 : (double.tryParse(rawValue) ?? 0.0);
 
         setState(() {
           _currentTemperature = temp;
         });
         
-        // 檢查是否觸發 Danger 警報機制
         _checkSafetyMechanism(temp);
       }
     });
   }
 
-  // 安全防護自動化核心邏輯
-  void _checkSafetyMechanism(double currentTemp) {
-    if (currentTemp >= tempDangerMin) {
-      if (!_isDangerTriggered) {
-        _isDangerTriggered = true; // 鎖定防重複觸發
-        _executeEmergencyShutdown();
+  // 🔌 新增：監聽後端運算的 power 狀態
+  void _listenToPowerState() {
+    _zoneRef.child('power').onValue.listen((event) {
+      if (event.snapshot.value != null) {
+        setState(() {
+          _currentPowerState = event.snapshot.value.toString();
+        });
       }
-    } else {
-      _isDangerTriggered = false; // 溫度降回安全線後解鎖
-    }
-  }
-
-  // ★ 新增：統一將通知推送到 Firebase，供 NotificationPage 讀取
-  void _pushNotification({required String title, required String content, required String type}) {
-    if (uid == null) return;
-    
-    // 使用當前時間戳記作為 key，或者用 push() 自動生成唯一 key
-    final notificationRef = FirebaseDatabase.instance.ref('users/$uid/notifications').push();
-    
-    notificationRef.set({
-      'title': title,
-      'content': content,
-      'timestamp': DateTime.now().toIso8601String(), // 儲存 ISO 格式時間
-      'type': type, // 'danger', 'warn', 或 'info'
     });
   }
 
-  // 執行危險狀態：全關 + 寫入資料庫通知紀錄 (帶有 uniqueID 方便後續刪除)
+  void _checkSafetyMechanism(double currentTemp) {
+    if (currentTemp >= tempDangerMin) {
+      if (!_isDangerTriggered) {
+        _isDangerTriggered = true; 
+        _executeEmergencyShutdown();
+      }
+    } else {
+      _isDangerTriggered = false; 
+    }
+  }
+
+  void _pushNotification({required String title, required String content, required String type}) {
+    if (uid == null) return;
+    
+    final notificationRef = FirebaseDatabase.instance.ref('users/$uid/notifications').push();
+    notificationRef.set({
+      'title': title,
+      'content': content,
+      'timestamp': DateTime.now().toIso8601String(), 
+      'type': type, 
+      'status': 'unread',
+      'zone_name': widget.zoneName,
+    });
+  }
+
   Future<void> _executeEmergencyShutdown() async {
-    // 1. 抓取當前所有裝置，將它們全數關閉
     final snapshot = await _devicesRef.get();
     if (snapshot.exists && snapshot.value != null) {
       final data = snapshot.value as Map<dynamic, dynamic>;
@@ -118,42 +120,33 @@ class _ServicePageState extends State<ServicePage> {
 
     if (uid == null) return;
     
-    // 建立新通知節點
     final notificationRef = FirebaseDatabase.instance.ref('users/$uid/notifications').push();
-    final String notificationId = notificationRef.key ?? ''; // 💡 拿到這條通知的 ID
-
     await notificationRef.set({
+      'zoneId': widget.zoneId,
       'title': '🚨 危險！溫度過高自動斷電',
       'content': '區域【${widget.zoneName}】目前環境溫度已達 ${_currentTemperature.toStringAsFixed(1)}°C。系統已強制關閉所有高負載裝置！',
       'timestamp': DateTime.now().toIso8601String(),
       'type': 'danger',
       'status': 'unread', 
+      'zone_name': widget.zoneName,
+      'temperature': _currentTemperature.toStringAsFixed(1),
     });
-
-    
   }
 
-  // 處理開關切換並發送 MQTT + ★ 寫入資料庫通知紀錄
   void _toggleDevice(String deviceId, bool status) {
-    // 1. 更新 Firebase 狀態（讓 UI 跟著動）
     _devicesRef.child(deviceId).update({'is_active': status});
 
-    // 2. 發送 MQTT 指令到指定的 Topic
     String command = status ? "ON" : "OFF";
     _mqttService.publishCommand(widget.mqttTopic, "$deviceId:$command");
     
-    // ★ 關鍵修改：手動操作開關時，將紀錄同步推送到通知資料庫
     String statusText = status ? "開啟" : "關閉";
     _pushNotification(
       title: '🔌 設備狀態變更',
       content: '您手動了$statusText【${widget.zoneName}】環境中的設備（ID: $deviceId）。',
-      type: 'info', // 一般操作類型，對應 NotificationPage 的操作藍
+      type: 'info', 
     );
-    
-    print("發送 MQTT 指令到 ${widget.mqttTopic} : $deviceId:$command");
   }
 
-  // 取得當前溫度對應的顏色與文字狀態
   Map<String, dynamic> _getTemperatureStatus(double temp) {
     if (temp >= tempDangerMin) {
       return {'text': 'Danger', 'color': Colors.red, 'icon': Icons.gpp_bad_rounded};
@@ -164,9 +157,7 @@ class _ServicePageState extends State<ServicePage> {
     }
   }
 
-  // 新增裝置（加入數量限制邏輯與 Enter 鍵觸發）
   void addDevice() {
-    // 關鍵限制：如果目前的裝置數量已經達到或超過 2 個，直接攔截並跳出警告
     if (_currentDeviceCount >= 2) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -180,7 +171,6 @@ class _ServicePageState extends State<ServicePage> {
 
     final TextEditingController idController = TextEditingController();
 
-    // 抽出核心新增邏輯，供按鈕與鍵盤 Enter 共用
     void submitNewDevice() {
       final String deviceId = idController.text.trim();
       if (deviceId.isNotEmpty) {
@@ -203,8 +193,8 @@ class _ServicePageState extends State<ServicePage> {
           children: [
             TextField(
               controller: idController,
-              textInputAction: TextInputAction.done, // 將鍵盤右下角按鈕改為「完成」圖示
-              onSubmitted: (_) => submitNewDevice(),  // ★ 關鍵：按下鍵盤 Enter/完成鍵時觸發
+              textInputAction: TextInputAction.done, 
+              onSubmitted: (_) => submitNewDevice(),  
               decoration: const InputDecoration(
                 labelText: '自訂 ID',
                 hintText: '例如：light_01',
@@ -219,7 +209,7 @@ class _ServicePageState extends State<ServicePage> {
             child: const Text('取消', style: TextStyle(color: Colors.grey)),
           ),
           TextButton(
-            onPressed: submitNewDevice, // 使用共用的新增邏輯
+            onPressed: submitNewDevice, 
             child: const Text('新增', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -229,7 +219,6 @@ class _ServicePageState extends State<ServicePage> {
 
   @override
   Widget build(BuildContext context) {
-
     final statusData = _getTemperatureStatus(_currentTemperature);
     final Color statusColor = statusData['color'];
     final String statusText = statusData['text'];
@@ -242,7 +231,6 @@ class _ServicePageState extends State<ServicePage> {
         elevation: 0,
       ),
       backgroundColor: Colors.white,
-      // 💡 注意：我們把 Scaffold 原本的 floatingActionButton 拿掉
       body: StreamBuilder(
         stream: _devicesRef.onValue,
         builder: (context, snapshot) {
@@ -259,14 +247,16 @@ class _ServicePageState extends State<ServicePage> {
             });
           }
 
-          // 更新裝置數量
           _currentDeviceCount = deviceList.length;
 
-          // 💡 使用 Stack：這樣當 Firebase 數據一變，整個畫面連同按鈕都會「同時」完美重繪！
           return Column(
             children: [
-              // 🌡️ 頂部手繪感溫度儀表板區塊面版
+              // 🌡️ 頂部儀表板區塊
               _buildTemperaturePanel(statusColor, statusText, statusData['icon']),
+              
+              // 🔌 新增：耗電狀態看板（插座 / 爆炸插座效果）
+              _buildPowerStatusPanel(),
+
               const Divider(height: 1, thickness: 1, color: Color(0xFFF5F5F5)),
               
               // 🔌 下方裝置清單區塊
@@ -301,11 +291,11 @@ class _ServicePageState extends State<ServicePage> {
       ),
     );
   }
- // --- 💡 修改後：完美呈現手繪感儀表板的 Widget ---
+
   Widget _buildTemperaturePanel(Color statusColor, String statusText, IconData statusIcon) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.grey[50],
@@ -314,10 +304,9 @@ class _ServicePageState extends State<ServicePage> {
       ),
       child: Column(
         children: [
-          // 📊 手繪半圓形儀表板本體
           SizedBox(
-            height: 80, // 半圓形稍微調整高度
-            width: 140, // 寬度拉長以符合半圓比例
+            height: 80, 
+            width: 140, 
             child: CustomPaint(
               painter: GaugePainter(
                 temperature: _currentTemperature,
@@ -329,11 +318,9 @@ class _ServicePageState extends State<ServicePage> {
           ),
           const SizedBox(height: 15),
           
-          // 欄位排版（符合手繪稿的 Temp: [ 25°C ]  Status: [ Safe ] 橫向排列）
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 溫度顯示欄位
               Row(
                 children: [
                   const Text('Temp : ', style: TextStyle(fontSize: 15, color: Colors.black, fontWeight: FontWeight.bold)),
@@ -342,7 +329,7 @@ class _ServicePageState extends State<ServicePage> {
                     decoration: BoxDecoration(
                       color: Colors.white, 
                       borderRadius: BorderRadius.circular(8), 
-                      border: Border.all(color: Colors.black, width: 1.5), // 帶點黑邊手繪感
+                      border: Border.all(color: Colors.black, width: 1.5), 
                     ),
                     child: Text('${_currentTemperature.toStringAsFixed(1)} °C', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                   ),
@@ -350,7 +337,6 @@ class _ServicePageState extends State<ServicePage> {
               ),
               const SizedBox(width: 24),
               
-              // 狀態燈與字樣顯示欄位
               Row(
                 children: [
                   const Text('Status : ', style: TextStyle(fontSize: 15, color: Colors.black, fontWeight: FontWeight.bold)),
@@ -380,7 +366,82 @@ class _ServicePageState extends State<ServicePage> {
       ),
     );
   }
-  // 裝置卡片 UI 
+
+  // 🔌 修正版：動態耗電狀態看板 UI（安全插座 vs 爆炸插座效果）
+  Widget _buildPowerStatusPanel() {
+    bool isWaste = _currentPowerState == 'waste';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        // 過度耗電時，使用更具警示感的深橘黃色背景
+        color: isWaste ? const Color(0xFFFFF3E0) : const Color(0xFFF9F9F9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isWaste ? const Color(0xFFD84315) : Colors.black26, 
+          width: isWaste ? 2.0 : 1.0
+        ),
+      ),
+      child: Row(
+        children: [
+          // 左側插座圖示區塊：利用 Stack 完美揉合「插座」與「爆炸」
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              // 基礎插座圖示
+              Padding(
+                padding: isWaste ? const EdgeInsets.only(top: 6.0) : EdgeInsets.zero,
+                child: Icon(
+                  Icons.power, 
+                  size: 38, 
+                  color: isWaste ? const Color(0xFF424242) : Colors.green[600] // 💥 耗電時插座變焦黑灰色
+                ),
+              ),
+              // 🔥 爆炸效果：如果過度耗電，在右上方疊加一個火山噴發/爆炸感的圖示
+              if (isWaste)
+                const Positioned(
+                  right: 0,
+                  top: 0,
+                  child: Icon(
+                    Icons.volcano, // 💥 火山噴發圖示，完美代替爆炸效果且相容舊版本
+                    size: 24, 
+                    color: Color(0xFFFF3D00), // 鮮豔的爆炸火橘色
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 16),
+          // 右側說明文字
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isWaste ? "💥 偵測到電力過度浪費！" : "🌱 用電量處於安全範圍",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: isWaste ? const Color(0xFFD84315) : Colors.green[800],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isWaste ? "此區域目前呈現嚴重耗電，請檢查是否有無人使用的電器正開著。" : "目前本區域的實時總耗電量正常。",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isWaste ? const Color(0xFFBF360C) : Colors.black54, // 🔌 已修正語法錯誤
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDeviceCard(Map<String, dynamic> device) {
     bool isActive = device['is_active'] ?? false;
     String id = device['id'];
@@ -423,7 +484,6 @@ class _ServicePageState extends State<ServicePage> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // ★ 升級版：點擊日曆圖示，直接跳轉到我們最強的排程頁面
                     IconButton(
                       icon: Icon(Icons.date_range, color: hasSchedule ? Colors.blue : Colors.grey[300]),
                       onPressed: () {
@@ -438,11 +498,9 @@ class _ServicePageState extends State<ServicePage> {
                         );
                       },
                     ),
-                    // 修改後 ★
                     Switch(
                       value: isActive,
                       activeColor: Colors.black,
-                      // 如果處於危險過熱狀態，不允許手動開啟開關做二次防呆
                       onChanged: _currentTemperature >= tempDangerMin ? null : (val) => _toggleDevice(id, val),
                     ),
                   ],
@@ -467,7 +525,7 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 }
-// 🎨 專門用來畫半圓形儀表板與指針的 Painter
+
 class GaugePainter extends CustomPainter {
   final double temperature;
   final double safeMin;
@@ -485,29 +543,24 @@ class GaugePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final Offset center = Offset(size.width / 2, size.height);
     final double radius = size.width / 2;
-
-    // 1. 繪製半圓底色背景區間 (Safe:綠, Warn:黃, Danger:紅)
-    final double maxTempRef = 100.0; // 假設儀表板最大度數為 100 度
+    final double maxTempRef = 100.0; 
     
-    // 計算各區間弧度比例
     double warnStartPercent = (warnMin - safeMin) / maxTempRef;
     double dangerStartPercent = (dangerMin - safeMin) / maxTempRef;
 
     Paint arcPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 24.0; // 弧帶的粗細
+      ..strokeWidth = 24.0; 
 
-    // Safe 區間 (綠色)
     arcPaint.color = Colors.green.withOpacity(0.3);
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius - 12),
-      3.14159, // 從 180 度開始 (左側)
+      3.14159, 
       3.14159 * warnStartPercent,
       false,
       arcPaint,
     );
 
-    // Warn 區間 (黃色/橘色)
     arcPaint.color = Colors.amber.withOpacity(0.3);
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius - 12),
@@ -517,7 +570,6 @@ class GaugePainter extends CustomPainter {
       arcPaint,
     );
 
-    // Danger 區間 (紅色)
     arcPaint.color = Colors.red.withOpacity(0.3);
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius - 12),
@@ -527,13 +579,11 @@ class GaugePainter extends CustomPainter {
       arcPaint,
     );
 
-    // 2. 繪製外圍黑框與刻度線 (手繪風格)
     Paint borderPaint = Paint()
       ..color = Colors.black.withOpacity(0.8)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
 
-    // 繪製半圓外框形
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
       3.14159,
@@ -541,10 +591,8 @@ class GaugePainter extends CustomPainter {
       false,
       borderPaint,
     );
-    // 繪製底部橫線
     canvas.drawLine(Offset(center.dx - radius, center.dy), Offset(center.dx + radius, center.dy), borderPaint);
 
-    // 繪製 5 條簡單刻度
     for (int i = 0; i <= 4; i++) {
       double angle = 3.14159 + (3.14159 / 4 * i);
       double startX = center.dx + (radius - 8) * math.cos(angle);
@@ -554,24 +602,19 @@ class GaugePainter extends CustomPainter {
       canvas.drawLine(Offset(startX, startY), Offset(endX, endY), borderPaint);
     }
 
-    // 3. 繪製中心黑點與指針
     Paint needlePaint = Paint()
       ..color = Colors.black.withOpacity(0.8)
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round;
 
-    // 依據當前溫度計算指針角度 (最小 0.0, 最大 maxTempRef)
     double currentPercent = (temperature / maxTempRef).clamp(0.0, 1.0);
     double needleAngle = 3.14159 + (3.14159 * currentPercent);
-
 
     double needleLength = radius - 15;
     double needleX = center.dx + needleLength * math.cos(needleAngle);
     double needleY = center.dy + needleLength * math.sin(needleAngle);
 
-    // 畫指針箭頭主線
     canvas.drawLine(center, Offset(needleX, needleY), needlePaint);
-    // 畫中心黑點
     canvas.drawCircle(center, 6.0, Paint()..color = Colors.black);
   }
 
