@@ -153,49 +153,37 @@ void startGlobalTemperatureListener(String uid) {
       }
 
       // -------------------------------------------------------------
-      // 2. ⚡ 耗電狀態防護與異常通知邏輯 (新加入)
+      // 2. ⚡ 耗電狀態防護與異常通知邏輯
       // -------------------------------------------------------------
       String powerState = zone['power'] ?? 'safe';
       bool isWasteTriggered = zone['is_waste_triggered'] ?? false;
 
       if (powerState == 'waste') {
-        // 如果狀態是 waste 且「之前還沒發過通知」
         if (!isWasteTriggered) {
-          print("🔌 警告！區域【$zoneName】偵測到不合適的耗電情形 (waste)！");
-          
-          // 在 Firebase 中將此區域標記為已觸發異常狀態
-          await db.ref('users/$uid/zones/$zoneId').update({
-            'is_waste_triggered': true,
-          });
+          await db.ref('users/$uid/zones/$zoneId').update({'is_waste_triggered': true});
 
-          // 推送藍色或警告類型的通知 (依據你的 NavPage 藍色通常歸類在 info/其他非危險類型)
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
-            'title': '🔌 💡 偵測到異常耗電提醒',
-            'content': '區域【$zoneName】目前有不合適的耗電情形（如空間無人但電器維持高功率運作）。建議前往確認或關閉閒置裝置。',
+            'title': '🔌 偵測到異常耗電提醒',
+            'content': '區域【$zoneName】目前有不合適的耗電情形。建議前往確認或關閉閒置裝置。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'info', // 💡 對應 NavPage 的藍色操作點提示
+            'type': 'warn', // 💡 改為 'warn' 讓前端顯示黃色/橘色
             'status': 'unread', 
+            'zone_name': zoneName,
           });
         }
       } else {
-        // 如果耗電狀態回復正常 (safe)，且「之前有觸發過異常通知」
         if (isWasteTriggered) {
-          print("🌱 區域【$zoneName】耗電情形已回復正常 (safe)。");
+          await db.ref('users/$uid/zones/$zoneId').update({'is_waste_triggered': false});
 
-          // 重設觸發旗標
-          await db.ref('users/$uid/zones/$zoneId').update({
-            'is_waste_triggered': false,
-          });
-
-          // 可選：發送一個恢復正常的通知
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
             'title': '🌱 耗電狀態已恢復正常',
             'content': '區域【$zoneName】的用電情況已回到一般正常範圍。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'info', // 藍色提示
+            'type': 'success', // 💡 改為 'success' 讓前端顯示安全綠
             'status': 'unread', 
+            'zone_name': zoneName,
           });
         }
       }
