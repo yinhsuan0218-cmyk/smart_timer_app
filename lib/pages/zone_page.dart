@@ -36,6 +36,7 @@ class _ZonePageState extends State<ZonePage> {
         _zonesRef.push().set({
           'name': nameController.text.trim(),
           'temperature': 0.0, // ESP32 或感測器尚未回傳前的初始溫度
+          'power': 'safe', // 預設耗電狀態
         });
         Navigator.pop(context);
       }
