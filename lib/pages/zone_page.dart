@@ -51,7 +51,7 @@ class _ZonePageState extends State<ZonePage> {
           controller: nameController,
           textInputAction: TextInputAction.done, 
           onSubmitted: (_) => submit(),         
-          decoration: const InputDecoration(labelText: '区域名稱', hintText: '例如：客廳、主臥室'),
+          decoration: const InputDecoration(labelText: '區域名稱', hintText: '例如：客廳、主臥室'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
