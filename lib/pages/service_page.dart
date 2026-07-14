@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'schedule_page.dart';
 import '../services/mqtt_service.dart';
 import 'dart:math' as math;
+import 'dart:async'; // ⏱️ 新增：用於 Timer
+import 'package:fl_chart/fl_chart.dart'; // 📊 新增：圖表套件
 
 class ServicePage extends StatefulWidget {
   final String zoneId;   
@@ -34,9 +36,12 @@ class _ServicePageState extends State<ServicePage> {
 
   double _currentTemperature = 70.0; 
   bool _isDangerTriggered = false;   
-  
-  // 🔌 新增：用來即時儲存該區域的耗電狀態 ('safe' 或 'waste')
   String _currentPowerState = 'safe';
+
+  // 📊 趨勢圖相關變數
+  final List<double> _tempHistory = []; // 儲存溫度歷史紀錄
+  Timer? _historyTimer; // 20秒定時器
+  final int _maxDataPoints = 10; // 圖表最多顯示最近 10 筆資料
 
   @override
   void initState() {
@@ -53,7 +58,30 @@ class _ServicePageState extends State<ServicePage> {
     }
     
     _listenToTemperature();
-    _listenToPowerState(); // 🔌 監聽耗電狀態
+    _listenToPowerState();
+    _startTemperatureTracking(); // ⏱️ 啟動每20秒紀錄一次的定時器
+  }
+
+  @override
+  void dispose() {
+    _historyTimer?.cancel(); // 🛑 記得銷毀定時器，避免記憶體洩漏
+    super.dispose();
+  }
+
+  // ⏱️ 新增：每 20 秒捕捉一次當前溫度寫入趨勢陣列
+  void _startTemperatureTracking() {
+    // 初始先加入一筆當前值
+    _tempHistory.add(_currentTemperature);
+
+    _historyTimer = Timer.periodic(const Duration(seconds: 20), (timer) {
+      setState(() {
+        _tempHistory.add(_currentTemperature);
+        // 如果歷史紀錄超出最大限制，就把最舊的（index 0）丟掉，維持圖表滾動感
+        if (_tempHistory.length > _maxDataPoints) {
+          _tempHistory.removeAt(0);
+        }
+      });
+    });
   }
 
   // 監聽溫度
@@ -72,7 +100,7 @@ class _ServicePageState extends State<ServicePage> {
     });
   }
 
-  // 🔌 新增：監聽後端運算的 power 狀態
+  // 監聽後端運算的 power 狀態
   void _listenToPowerState() {
     _zoneRef.child('power').onValue.listen((event) {
       if (event.snapshot.value != null) {
@@ -254,7 +282,10 @@ class _ServicePageState extends State<ServicePage> {
               // 🌡️ 頂部儀表板區塊
               _buildTemperaturePanel(statusColor, statusText, statusData['icon']),
               
-              // 🔌 新增：耗電狀態看板（插座 / 爆炸插座效果）
+              // 📊 新增：每 20 秒更新的溫度歷史趨勢圖
+              _buildTemperatureChart(),
+
+              // 🔌 耗電狀態看板（插座 / 爆炸插座效果）
               _buildPowerStatusPanel(),
 
               const Divider(height: 1, thickness: 1, color: Color(0xFFF5F5F5)),
@@ -367,7 +398,91 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 
-  // 🔌 修正版：動態耗電狀態看板 UI（安全插座 vs 爆炸插座效果）
+  // 📊 新增：折線趨勢圖控制項 UI
+  Widget _buildTemperatureChart() {
+    // 將儲存的 double 陣列轉換為 fl_chart 需要的 FlSpot 座標
+    List<FlSpot> spots = [];
+    for (int i = 0; i < _tempHistory.length; i++) {
+      spots.add(FlSpot(i.toDouble(), _tempHistory[i]));
+    }
+
+    // 如果剛開畫面還沒有收集到資料，就先顯示載入中
+    if (spots.isEmpty) {
+      return const SizedBox(
+        height: 140,
+        child: Center(child: Text("正在收集溫度數據 (每20秒更新)...", style: TextStyle(color: Colors.grey, fontSize: 12))),
+      );
+    }
+
+    return Container(
+      height: 140,
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.fromLTRB(12, 16, 24, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFBFBFB),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: LineChart(
+        LineChartData(
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            getDrawingHorizontalLine: (value) => FlLine(
+              color: Colors.grey.withOpacity(0.15),
+              strokeWidth: 1,
+            ),
+          ),
+          titlesData: FlTitlesData(
+            show: true,
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), // 隱藏底部雜亂的 index 軸點
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 32,
+                interval: 20, // 縱軸每 20 度畫一條橫線線標
+                getTitlesWidget: (value, meta) {
+                  return Text(
+                    '${value.toInt()}°C',
+                    style: const TextStyle(color: Colors.black45, fontSize: 10, fontWeight: FontWeight.bold),
+                  );
+                },
+              ),
+            ),
+          ),
+          borderData: FlBorderData(show: false),
+          minX: 0,
+          maxX: (_maxDataPoints - 1).toDouble(),
+          minY: 0,
+          maxY: 100, // 與儀表板刻度一致
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true, // 曲線平滑
+              color: _currentTemperature >= tempDangerMin 
+                  ? Colors.red 
+                  : (_currentTemperature >= tempWarnMin ? Colors.amber : Colors.blue),
+              barWidth: 3,
+              isStrokeCapRound: true,
+              dotData: const FlDotData(show: true), // 顯示數據點的小圓圈
+              belowBarData: BarAreaData(
+                show: true,
+                color: (_currentTemperature >= tempDangerMin 
+                        ? Colors.red 
+                        : (_currentTemperature >= tempWarnMin ? Colors.amber : Colors.blue))
+                    .withOpacity(0.1),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🔌 動態耗電狀態看板 UI
   Widget _buildPowerStatusPanel() {
     bool isWaste = _currentPowerState == 'waste';
 
@@ -376,7 +491,6 @@ class _ServicePageState extends State<ServicePage> {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        // 過度耗電時，使用更具警示感的深橘黃色背景
         color: isWaste ? const Color(0xFFFFF3E0) : const Color(0xFFF9F9F9),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
@@ -386,34 +500,30 @@ class _ServicePageState extends State<ServicePage> {
       ),
       child: Row(
         children: [
-          // 左側插座圖示區塊：利用 Stack 完美揉合「插座」與「爆炸」
           Stack(
             alignment: Alignment.center,
             children: [
-              // 基礎插座圖示
               Padding(
                 padding: isWaste ? const EdgeInsets.only(top: 6.0) : EdgeInsets.zero,
                 child: Icon(
                   Icons.power, 
                   size: 38, 
-                  color: isWaste ? const Color(0xFF424242) : Colors.green[600] // 💥 耗電時插座變焦黑灰色
+                  color: isWaste ? const Color(0xFF424242) : Colors.green[600]
                 ),
               ),
-              // 🔥 爆炸效果：如果過度耗電，在右上方疊加一個火山噴發/爆炸感的圖示
               if (isWaste)
                 const Positioned(
                   right: 0,
                   top: 0,
                   child: Icon(
-                    Icons.volcano, // 💥 火山噴發圖示，完美代替爆炸效果且相容舊版本
+                    Icons.volcano, 
                     size: 24, 
-                    color: Color(0xFFFF3D00), // 鮮豔的爆炸火橘色
+                    color: Color(0xFFFF3D00),
                   ),
                 ),
             ],
           ),
           const SizedBox(width: 16),
-          // 右側說明文字
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -431,7 +541,7 @@ class _ServicePageState extends State<ServicePage> {
                   isWaste ? "此區域目前呈現嚴重耗電，請檢查是否有無人使用的電器正開著。" : "目前本區域的實時總耗電量正常。",
                   style: TextStyle(
                     fontSize: 12,
-                    color: isWaste ? const Color(0xFFBF360C) : Colors.black54, // 🔌 已修正語法錯誤
+                    color: isWaste ? const Color(0xFFBF360C) : Colors.black54,
                   ),
                 ),
               ],
@@ -525,6 +635,8 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 }
+
+// (GaugePainter 保持不變，故省略以節省篇幅)
 
 class GaugePainter extends CustomPainter {
   final double temperature;
