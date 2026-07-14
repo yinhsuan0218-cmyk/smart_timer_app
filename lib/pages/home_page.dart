@@ -5,6 +5,7 @@ import '../models/service.dart';
 import 'commonappbar.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // ★ 務必加上這行
 import 'schedule_page.dart';
+import 'week_page.dart';
 import '../services/mqtt_service.dart';
 
 class HomePage extends StatefulWidget {
@@ -249,18 +250,38 @@ void _updateDatabaseStatus(String zoneId, String deviceId, bool currentStatus) {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 標題部分
-          const Padding(
-            padding: EdgeInsets.fromLTRB(24, 60, 24, 0),
-            child: Text(
-              'Home',
-              style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 60, 24, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Home',
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                ),
+                // 新增的一週行程按鈕
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.black,
+                    backgroundColor: Colors.grey[100],
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  icon: const Icon(Icons.date_range_rounded, size: 20),
+                  label: const Text('一週行程', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const WeeklySchedulePage(), // 導向一週排程總覽頁面
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
-            child: Text('管理您的智慧設備', style: TextStyle(fontSize: 14, color: Colors.black45)),
-          ),
-
+          
           // 篩選標籤
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
