@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // 💡 引入以取得目前登入使用者
-import 'ai.dart';
+import 'ai.dart'; // 確保此處引入的是你新版定義了 Zone, Device, AppNotification 的 ai.dart
 
 class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBackButton;
@@ -34,77 +34,42 @@ class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
               );
             }
 
+            // 💡 防呆：如果沒資料或出錯，傳入空陣列，避免 AiChatSheet 建構子少傳參數報錯
             if (snapshot.hasError || !snapshot.hasData || snapshot.data?.snapshot.value == null) {
-              // 💡 修正：如果沒資料或出錯，傳入空陣列，避免 AiChatSheet 建構子少傳參數報錯
-              return const AiChatSheet(zones: [], services: [], schedules: []);
+              return const AiChatSheet(zones: [], notifications: []);
             }
 
             // 📦 開始解析從 Firebase 拿到的原始 Map 資料
             final rawData = Map<dynamic, dynamic>.from(snapshot.data!.snapshot.value as Map);
 
-            // 1. 解析 Zones (對應你的 Zone class)
+            // 1. 解析 Zones (對應你新版的 Zone 與 Device 巢狀結構)
             List<Zone> loadedZones = [];
             if (rawData['zones'] != null) {
               final zonesMap = Map<dynamic, dynamic>.from(rawData['zones']);
               zonesMap.forEach((key, value) {
-                final zoneData = Map<dynamic, dynamic>.from(value);
-                
-                // 💡 關鍵安全防護：在這裡就做好溫度的防呆解析
-                double parsedTemp = 0.0;
-                final rawTemp = zoneData['temperature'];
-                if (rawTemp != null) {
-                  if (rawTemp is num) {
-                    parsedTemp = rawTemp.toDouble();
-                  } else if (rawTemp is String) {
-                    parsedTemp = double.tryParse(rawTemp) ?? 0.0;
-                  }
+                if (value is Map) {
+                  final zoneData = Map<dynamic, dynamic>.from(value);
+                  loadedZones.add(Zone.fromMap(key.toString(), zoneData));
                 }
-
-                loadedZones.add(Zone(
-                  id: key.toString(),
-                  name: zoneData['name'] ?? '未命名區域',
-                  temperature: parsedTemp, // ✨ 帶入安全解析後的溫度
-                  power: zoneData['power'] ?? 'safe',
-                ));
               });
             }
 
-            // 2. 解析 Services (對應你的 Service class)
-            List<Service> loadedServices = [];
-            if (rawData['services'] != null) {
-              final servicesMap = Map<dynamic, dynamic>.from(rawData['services']);
-              servicesMap.forEach((key, value) {
-                final serviceData = Map<dynamic, dynamic>.from(value);
-                loadedServices.add(Service(
-                  id: key.toString(),
-                  name: serviceData['name'] ?? '未命名服務',
-                ));
-              });
-            }
-
-            // 3. 解析 Schedules (對應你的 Schedule class)
-            List<Schedule> loadedSchedules = [];
-            if (rawData['schedules'] != null) {
-              final schedulesList = List<dynamic>.from(rawData['schedules']);
-              for (var item in schedulesList) {
-                if (item != null) {
-                  final schMap = Map<dynamic, dynamic>.from(item);
-                  // 將 Firebase 的 [true, true...] 轉成 List<bool>
-                  final List<bool> weekdays = List<bool>.from(schMap['weekdays'] ?? List.filled(7, false));
-                  loadedSchedules.add(Schedule(
-                    weekdays,
-                    schMap['start'] ?? '00:00',
-                    schMap['end'] ?? '00:00',
-                  ));
+            // 2. 解析 Notifications (對應你新版的 AppNotification 結構)
+            List<AppNotification> loadedNotifications = [];
+            if (rawData['notifications'] != null) {
+              final notificationsMap = Map<dynamic, dynamic>.from(rawData['notifications']);
+              notificationsMap.forEach((key, value) {
+                if (value is Map) {
+                  final notifData = Map<dynamic, dynamic>.from(value);
+                  loadedNotifications.add(AppNotification.fromMap(key.toString(), notifData));
                 }
-              }
+              });
             }
 
             // 🚀 將實時資料，直接丟給你的 AI 助理！
             return AiChatSheet(
               zones: loadedZones,
-              services: loadedServices,
-              schedules: loadedSchedules,
+              notifications: loadedNotifications,
             );
           },
         );
