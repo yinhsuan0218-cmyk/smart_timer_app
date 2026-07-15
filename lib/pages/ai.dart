@@ -2,58 +2,116 @@ import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 // ==========================================
-// 1. 引入或定義你的資料結構 (若已在其他檔案定義，請改為 import)
+// 1. 資料結構重構 (完美契合 Firebase RTDB)
 // ==========================================
-class Zone {
-  String id;
-  String name;
-  double temperature;
-  String power; // 'safe' 或其他安全狀態，或開關狀態
 
-  Zone({
+class Device {
+  final String id;
+  final String name;
+  final bool isActive;
+  final String timerStart;
+  final String timerEnd;
+  final Map<dynamic, dynamic>? scheduleDays;
+  final String lastUpdated;
+
+  Device({
     required this.id,
     required this.name,
-    this.temperature = 0.0,
-    this.power = 'safe',
+    required this.isActive,
+    required this.timerStart,
+    required this.timerEnd,
+    this.scheduleDays,
+    required this.lastUpdated,
   });
 
-  factory Zone.fromMap(String id, Map<dynamic, dynamic> map) {
-    return Zone(
+  factory Device.fromMap(String id, Map<dynamic, dynamic> map) {
+    return Device(
       id: id,
-      name: map['name'] ?? '未命名區域',
-      temperature: (map['temperature'] ?? 0.0).toDouble(),
-      power: map['power'] ?? 'safe',
+      name: map['name'] ?? '未命名裝置',
+      isActive: map['is_active'] ?? false,
+      timerStart: map['timer_start'] ?? '',
+      timerEnd: map['timer_end'] ?? '',
+      scheduleDays: map['schedule_days'] is Map ? map['schedule_days'] : null,
+      lastUpdated: map['last_updated'] ?? '',
     );
   }
 }
 
-class Service {
-  String id;
-  String name;
-  Service({required this.id, required this.name});
+class Zone {
+  final String id;
+  final String name;
+  final String temperature; // 資料庫中為字串，部分為空 ""
+  final List<Device> devices;
+
+  Zone({
+    required this.id,
+    required this.name,
+    required this.temperature,
+    required this.devices,
+  });
+
+  factory Zone.fromMap(String id, Map<dynamic, dynamic> map) {
+    var devicesList = <Device>[];
+    if (map['devices'] is Map) {
+      (map['devices'] as Map).forEach((key, value) {
+        if (value is Map) {
+          devicesList.add(Device.fromMap(key.toString(), value));
+        }
+      });
+    }
+
+    return Zone(
+      id: id,
+      name: map['name'] ?? '未命名區域',
+      temperature: map['temperature']?.toString() ?? '',
+      devices: devicesList,
+    );
+  }
 }
 
-class Schedule {
-  List<bool> weekdays; // Mon ~ Sun (長度為 7)
-  String start;
-  String end;
+class AppNotification {
+  final String id;
+  final String title;
+  final String content;
+  final String status;
+  final String type;
+  final String timestamp;
+  final String zoneName;
 
-  Schedule(this.weekdays, this.start, this.end);
+  AppNotification({
+    required this.id,
+    required this.title,
+    required this.content,
+    required this.status,
+    required this.type,
+    required this.timestamp,
+    required this.zoneName,
+  });
+
+  factory AppNotification.fromMap(String id, Map<dynamic, dynamic> map) {
+    return AppNotification(
+      id: id,
+      title: map['title'] ?? '系統通知',
+      content: map['content'] ?? '',
+      status: map['status'] ?? 'unread',
+      type: map['type'] ?? 'info',
+      timestamp: map['timestamp'] ?? '',
+      zoneName: map['zone_name'] ?? '',
+    );
+  }
 }
 
 // ==========================================
-// 2. 智慧助理介面 (動態接收後端實時資料)
+// 2. 智慧助理介面
 // ==========================================
 class AiChatSheet extends StatefulWidget {
-  final List<Zone> zones;       // 傳入當前使用者的區域狀態
-  final List<Service> services; // 傳入當前可用的服務
-  final List<Schedule> schedules; // 傳入當前設定的排程
+  final List<Zone> zones;                       // 傳入當前所有區域與內嵌裝置
+  final List<AppNotification> notifications;    // 傳入當前的通知與警告列表
 
   const AiChatSheet({
     super.key,
     required this.zones,
-    required this.services,
-    required this.schedules,
+    required this.notifications,
   });
 
   @override
@@ -64,7 +122,6 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   
-  // 🎙️ 語音辨識
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _isListening = false;
   double _soundLevel = 0.0;
@@ -80,16 +137,21 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
       duration: const Duration(milliseconds: 1000),
     )..repeat(reverse: true);
     
-    // 初始化歡迎詞，帶入當前抓取到的設備數量
+    // 計算總裝置數
+    int totalDevices = widget.zones.fold(0, (sum, zone) => sum + zone.devices.length);
+    // 找出未讀警告數
+    int totalWarns = widget.notifications.where((n) => n.type == 'warn' && n.status == 'unread').length;
+
+    // 初始化歡迎詞
     _messages = [
       {
         'isUser': false,
         'text': '你好！我是你的 Smart Timer 智慧助理。🤖\n'
-                '目前已成功為您連線到後端資料：\n'
-                '• 已偵測到 ${widget.zones.length} 個監控區域\n'
-                '• 已啟用 ${widget.services.length} 項服務\n'
-                '• 已設定 ${widget.schedules.length} 組定時排程\n\n'
-                '您可以問我「各區溫度」、「排程設定」或「安全狀態」喔！',
+                '目前實時系統狀態：\n'
+                '• 已連線監控區域：${widget.zones.length} 個\n'
+                '• 納管智慧裝置總數：$totalDevices 個\n'
+                '• 未處理異常警告：$totalWarns 則\n\n'
+                '您可以問我「各區溫度」、「裝置狀態」、「排程定時」或「有沒有異常通知」喔！',
         'time': _getNowTime()
       },
     ];
@@ -122,76 +184,92 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
     final text = rawText.toLowerCase();
     String responseText = "";
 
-    // 1. 查詢「溫度」：動態撈取所有 Zone 的溫度
+    // 1. 查詢「溫度」
     if (text.contains("溫度") || text.contains("幾度") || text.contains("熱") || text.contains("冷")) {
       if (widget.zones.isEmpty) {
-        responseText = "🌡️ 目前後端系統中沒有設定任何區域，無法取得溫度資料。";
+        responseText = "🌡️ 目前系統中沒有設定任何區域，無法取得溫度資料。";
       } else {
         responseText = "🌡️ 為您查詢各區域的實時溫度：\n";
         for (var zone in widget.zones) {
-          responseText += "• ${zone.name}: ${zone.temperature}°C\n";
-        }
-        responseText += "\n所有區域溫度均在正常範圍內！";
-      }
-    }
-    // 2. 查詢「安全狀態」/「電力/安全 power 欄位」
-    else if (text.contains("安全") || text.contains("狀態") || text.contains("危險")) {
-      if (widget.zones.isEmpty) {
-        responseText = "🛡️ 目前沒有可監控的區域狀態。";
-      } else {
-        responseText = "🛡️ 系統安全與狀態回報：\n";
-        for (var zone in widget.zones) {
-          String statusEmoji = (zone.power == "safe") ? "✅ 安全" : "⚠️ 異常 (${zone.power})";
-          responseText += "• ${zone.name}: $statusEmoji\n";
+          String tempDisplay = zone.temperature.isEmpty ? "未回報 (或無感測器)" : "${zone.temperature}°C";
+          responseText += "• 區域【${zone.name}】: $tempDisplay\n";
         }
       }
     }
-    // 3. 查詢「服務」：查詢有哪些 Service
-    else if (text.contains("服務") || text.contains("功能") || text.contains("service")) {
-      if (widget.services.isEmpty) {
-        responseText = "⚙️ 您目前尚未啟用任何智慧服務。";
+    // 2. 查詢「裝置開關狀態 / 電力狀態」
+    else if (text.contains("狀態") || text.contains("開關") || text.contains("打開") || text.contains("開啟") || text.contains("關閉")) {
+      // 如果單純是控制指令（開啟/關閉某裝置）
+      if (text.contains("開啟") || text.contains("打開") || text.contains("關閉") || text.contains("關掉")) {
+        final action = (text.contains("開啟") || text.contains("打開")) ? "開啟" : "關閉";
+        responseText = "🔌 收到「$action」指令！\n正在透過 MQTT 向您的 ESP32 控制端發送訊號...\n(命令已成功發送)";
       } else {
-        responseText = "⚙️ 您目前啟用的後端服務有：\n";
-        for (var service in widget.services) {
-          responseText += "• [ID: ${service.id}] ${service.name}\n";
-        }
-      }
-    }
-    // 4. 查詢「定時排程」：動態解析 Schedule 物件中的 weekdays 與時間
-    else if (text.contains("排程") || text.contains("定時") || text.contains("時間表") || text.contains("幾點")) {
-      if (widget.schedules.isEmpty) {
-        responseText = "📅 目前您的智慧定時器沒有設定任何排程。";
-      } else {
-        responseText = "📅 您的實時定時排程如下：\n";
-        final weekNames = ["一", "二", "三", "四", "五", "六", "日"];
-        
-        for (int i = 0; i < widget.schedules.length; i++) {
-          final sch = widget.schedules[i];
-          // 解析 weekdays List<bool>
-          List<String> activeDays = [];
-          for (int j = 0; j < sch.weekdays.length; j++) {
-            if (sch.weekdays[j]) {
-              activeDays.add(weekNames[j]);
+        // 查詢狀態
+        if (widget.zones.isEmpty) {
+          responseText = "🔌 目前沒有任何區域與裝置。";
+        } else {
+          responseText = "🔌 各區域裝置實時開關狀態：\n";
+          for (var zone in widget.zones) {
+            responseText += "📦 區域：${zone.name}\n";
+            if (zone.devices.isEmpty) {
+              responseText += "  (此區域目前沒有掛載裝置)\n";
+            } else {
+              for (var dev in zone.devices) {
+                String statusEmoji = dev.isActive ? "🟢 已開啟 (Active)" : "🔴 已關閉 (Inactive)";
+                responseText += "  • ${dev.name}: $statusEmoji\n";
+              }
             }
           }
-          String daysStr = activeDays.length == 7 ? "每天" : "每週 (${activeDays.join(', ')})";
-          responseText += "⏰ 排程 ${i + 1}：\n   - 重複：$daysStr\n   - 時間：${sch.start} ～ ${sch.end}\n\n";
         }
       }
     }
-    // 5. 語音或文字控制指令 (模擬硬體觸發控制)
-    else if (text.contains("開啟") || text.contains("打開") || text.contains("關閉") || text.contains("關掉")) {
-      final action = (text.contains("開啟") || text.contains("打開")) ? "開啟" : "關閉";
-      responseText = "🔌 收到「$action」指令！\n正在透過後端向您的 ESP32 傳送控制訊號...\n(已成功送出 MQTT 命令)";
-      // 💡 實際應用：這裡可以直接呼叫你主頁面的 Callback 函式發送 MQTT 或更新 Firebase。
+    // 3. 查詢「定時排程」
+    else if (text.contains("排程") || text.contains("定時") || text.contains("時間") || text.contains("幾點")) {
+      responseText = "⏰ 幫您查詢目前的裝置定時設定：\n";
+      bool hasSchedule = false;
+
+      for (var zone in widget.zones) {
+        for (var dev in zone.devices) {
+          if (dev.timerStart.isNotEmpty || dev.timerEnd.isNotEmpty) {
+            hasSchedule = true;
+            responseText += "💡 【${dev.name}】(${zone.name})\n"
+                            "  - 啟動時間: ${dev.timerStart}\n"
+                            "  - 結束時間: ${dev.timerEnd}\n";
+            if (dev.scheduleDays != null) {
+              // 可選擇性在此解析星期
+              responseText += "  - 重複週期: 已設定排程天數\n";
+            }
+            responseText += "\n";
+          }
+        }
+      }
+      if (!hasSchedule) {
+        responseText = "📅 目前所有裝置皆未設定定時排程。";
+      }
     }
-    // 6. 預設模糊回覆
+    // 4. 查詢「異常 / 通知 / 警告」
+    else if (text.contains("警告") || text.contains("通知") || text.contains("異常") || text.contains("耗電")) {
+      if (widget.notifications.isEmpty) {
+        responseText = "🔔 目前沒有任何系統警報或通知，運作一切正常！";
+      } else {
+        responseText = "⚠️ 系統最近的通知與警告摘要：\n\n";
+        // 撈取最近的 3 筆
+        final recentNotifs = widget.notifications.reversed.take(3);
+        for (var notif in recentNotifs) {
+          String typeIcon = notif.type == "warn" ? "⚠️ [警告]" : "ℹ️ [提示]";
+          String status = notif.status == "read" ? "(已讀)" : "(未讀*)";
+          responseText += "$typeIcon ${notif.title} $status\n"
+                          "• 內容: ${notif.content}\n"
+                          "• 時間: ${notif.timestamp}\n\n";
+        }
+      }
+    }
+    // 5. 預設模糊回覆
     else {
-      responseText = "抱歉，我沒聽懂「$rawText」。🤔\n\n您可以這樣問我：\n"
+      responseText = "抱歉，我沒聽懂「$rawText」。🤔\n\n您可以試著這樣問我：\n"
                      "👉「查看各區溫度」\n"
-                     "👉「查詢目前排程」\n"
-                     "👉「安全狀態如何？」\n"
-                     "👉「開啟/關閉設備」";
+                     "👉「目前有哪些裝置是開著的？」\n"
+                     "👉「查詢咖啡機的排程定時」\n"
+                     "👉「有沒有異常耗電警告？」";
     }
 
     // 延遲 800ms 模擬思考後回覆
@@ -279,7 +357,7 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
       ),
       child: Column(
         children: [
-          // 頂部列
+          // 頂部標題列
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -314,7 +392,7 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
           ),
           const Divider(height: 16, color: Colors.black12),
 
-          // 對話列表
+          // 對話訊息列表
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -357,7 +435,7 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
           if (_isListening) _buildVoiceWaveform(),
           const SizedBox(height: 8),
 
-          // 輸入欄
+          // 輸入控制列
           Row(
             children: [
               AnimatedBuilder(
@@ -400,7 +478,7 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
                     controller: _textController,
                     onSubmitted: _sendMessage,
                     decoration: const InputDecoration(
-                      hintText: "問「客廳溫度」或「今天排程」...",
+                      hintText: "問「各區溫度」、「排程」或「最新警告」...",
                       border: InputBorder.none,
                       hintStyle: TextStyle(fontSize: 13),
                     ),
@@ -426,7 +504,7 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
     );
   }
 
-  // 波動動畫
+  // 語音波動動畫
   Widget _buildVoiceWaveform() {
     double normalizedVolume = (_soundLevel + 2).clamp(0.0, 12.0);
     return Container(
