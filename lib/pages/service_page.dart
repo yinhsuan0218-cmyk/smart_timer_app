@@ -4,8 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'schedule_page.dart';
 import '../services/mqtt_service.dart';
 import 'dart:math' as math;
-import 'dart:async'; // ⏱️ 新增：用於 Timer
-import 'package:fl_chart/fl_chart.dart'; // 📊 新增：圖表套件
+import 'dart:async'; 
+import 'package:fl_chart/fl_chart.dart'; 
 
 class ServicePage extends StatefulWidget {
   final String zoneId;   
@@ -39,9 +39,12 @@ class _ServicePageState extends State<ServicePage> {
   String _currentPowerState = 'safe';
 
   // 📊 趨勢圖相關變數
-  final List<double> _tempHistory = []; // 儲存溫度歷史紀錄
-  Timer? _historyTimer; // 20秒定時器
-  final int _maxDataPoints = 10; // 圖表最多顯示最近 10 筆資料
+  final List<Map<String, dynamic>> _tempHistory = []; 
+  final int _maxDataPoints = 8; 
+  StreamSubscription? _tempSubscription; 
+
+  // 📌 宣告一個用來通知 BottomSheet 實時重繪的 StateSetter
+  StateSetter? _sheetStateSetter;
 
   @override
   void initState() {
@@ -59,48 +62,48 @@ class _ServicePageState extends State<ServicePage> {
     
     _listenToTemperature();
     _listenToPowerState();
-    _startTemperatureTracking(); // ⏱️ 啟動每20秒紀錄一次的定時器
   }
 
   @override
   void dispose() {
-    _historyTimer?.cancel(); // 🛑 記得銷毀定時器，避免記憶體洩漏
+    _tempSubscription?.cancel(); 
     super.dispose();
   }
 
-  // ⏱️ 新增：每 20 秒捕捉一次當前溫度寫入趨勢陣列
-  void _startTemperatureTracking() {
-    // 初始先加入一筆當前值
-    _tempHistory.add(_currentTemperature);
-
-    _historyTimer = Timer.periodic(const Duration(seconds: 20), (timer) {
-      setState(() {
-        _tempHistory.add(_currentTemperature);
-        // 如果歷史紀錄超出最大限制，就把最舊的（index 0）丟掉，維持圖表滾動感
-        if (_tempHistory.length > _maxDataPoints) {
-          _tempHistory.removeAt(0);
-        }
-      });
-    });
-  }
-
-  // 監聽溫度
+  // ⏱️ 實時監聽溫度
   void _listenToTemperature() {
-    _zoneRef.child('temperature').onValue.listen((event) {
+    _tempSubscription = _zoneRef.child('temperature').onValue.listen((event) {
       if (event.snapshot.value != null) {
         String rawValue = event.snapshot.value.toString().trim();
         double temp = rawValue.isEmpty ? 0.0 : (double.tryParse(rawValue) ?? 0.0);
 
+        final DateTime now = DateTime.now();
+        final String formattedTime = 
+            "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
         setState(() {
           _currentTemperature = temp;
+
+          _tempHistory.add({
+            'temp': temp,
+            'time': formattedTime,
+          });
+
+          if (_tempHistory.length > _maxDataPoints) {
+            _tempHistory.removeAt(0);
+          }
         });
+
+        // 🔔 如果 BottomSheet 此時是打開狀態，強制觸發它的局部重繪，讓折線圖實時滾動
+        if (_sheetStateSetter != null) {
+          _sheetStateSetter!(() {});
+        }
         
         _checkSafetyMechanism(temp);
       }
     });
   }
 
-  // 監聽後端運算的 power 狀態
   void _listenToPowerState() {
     _zoneRef.child('power').onValue.listen((event) {
       if (event.snapshot.value != null) {
@@ -245,6 +248,80 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 
+  // 📈 彈出式趨勢圖小視窗（自訂圓角與微浮空感）
+  void _showChartBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent, // 讓容器能展現自訂卡片陰影與圓角
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            // 將內部的 setModalState 指派給外部變數，以便 Firebase 資料推送時同步更新
+            _sheetStateSetter = setModalState;
+
+            return Container(
+              margin: const EdgeInsets.all(16), // 營造四邊「浮空」非貼底的視覺感
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.black, width: 2), // 連貫黑框風格
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 15,
+                    offset: const Offset(0, 5),
+                  )
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min, // 依據內容高度自適應
+                children: [
+                  // 頂部小拉條裝飾
+                  Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.analytics_outlined, color: Colors.black, size: 22),
+                          const SizedBox(width: 8),
+                          Text(
+                            "${widget.zoneName} 實時溫度趨勢",
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded, color: Colors.black),
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // 繪製趨勢圖
+                  _buildTemperatureChart(),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).then((_) {
+      // ⚠️ 視窗關閉時，清空 Setter 引用，避免記憶體洩漏與背景呼叫錯誤
+      _sheetStateSetter = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final statusData = _getTemperatureStatus(_currentTemperature);
@@ -271,6 +348,7 @@ class _ServicePageState extends State<ServicePage> {
             rawData.forEach((key, value) {
               final device = Map<String, dynamic>.from(value);
               device['id'] = key;
+              device['deviceList'] = deviceList; 
               deviceList.add(device);
             });
           }
@@ -279,13 +357,10 @@ class _ServicePageState extends State<ServicePage> {
 
           return Column(
             children: [
-              // 🌡️ 頂部儀表板區塊
+              // 🌡️ 頂部儀表板區塊 (已將點擊手勢與展開折疊移除)
               _buildTemperaturePanel(statusColor, statusText, statusData['icon']),
               
-              // 📊 新增：每 20 秒更新的溫度歷史趨勢圖
-              _buildTemperatureChart(),
-
-              // 🔌 耗電狀態看板（插座 / 爆炸插座效果）
+              // 🔌 耗電狀態看板
               _buildPowerStatusPanel(),
 
               const Divider(height: 1, thickness: 1, color: Color(0xFFF5F5F5)),
@@ -323,6 +398,7 @@ class _ServicePageState extends State<ServicePage> {
     );
   }
 
+  // 🌡️ 重新設計後的儀表板區塊 (按鈕移至最下方)
   Widget _buildTemperaturePanel(Color statusColor, String statusText, IconData statusIcon) {
     return Container(
       width: double.infinity,
@@ -331,10 +407,11 @@ class _ServicePageState extends State<ServicePage> {
       decoration: BoxDecoration(
         color: Colors.grey[50],
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.black),
+        border: Border.all(color: Colors.black, width: 1.5),
       ),
       child: Column(
         children: [
+          // 儀表盤繪製
           SizedBox(
             height: 80, 
             width: 140, 
@@ -347,8 +424,9 @@ class _ServicePageState extends State<ServicePage> {
               ),
             ),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 12),
           
+          // 數值與狀態顯示列
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -362,12 +440,11 @@ class _ServicePageState extends State<ServicePage> {
                       borderRadius: BorderRadius.circular(8), 
                       border: Border.all(color: Colors.black, width: 1.5), 
                     ),
-                    child: Text('${_currentTemperature.toStringAsFixed(1)} °C', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                    child: Text('${_currentTemperature.toStringAsFixed(1)} °C', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
-              const SizedBox(width: 24),
-              
+              const SizedBox(width: 16),
               Row(
                 children: [
                   const Text('Status : ', style: TextStyle(fontSize: 15, color: Colors.black, fontWeight: FontWeight.bold)),
@@ -384,7 +461,7 @@ class _ServicePageState extends State<ServicePage> {
                         const SizedBox(width: 4),
                         Text(
                           statusText, 
-                          style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)
+                          style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)
                         ),
                       ],
                     ),
@@ -393,37 +470,63 @@ class _ServicePageState extends State<ServicePage> {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          
+          // 📌 位於板塊內最下方的實時趨勢按鈕 (點擊觸發彈出視窗)
+          InkWell(
+            onTap: _showChartBottomSheet,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.black, width: 1.5),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black,
+                    offset: Offset(2, 2), // 營造稍微的重描邊與 2.5D 陰影感
+                  ),
+                ],
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.analytics_outlined, size: 16, color: Colors.black),
+                  SizedBox(width: 6),
+                  Text(
+                    '查看實時溫度趨勢圖', 
+                    style: TextStyle(fontSize: 13, color: Colors.black, fontWeight: FontWeight.bold)
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // 📊 新增：折線趨勢圖控制項 UI
+  // 📊 折線趨勢圖 (稍微將 margin 移出以適應彈出視窗)
   Widget _buildTemperatureChart() {
-    // 將儲存的 double 陣列轉換為 fl_chart 需要的 FlSpot 座標
     List<FlSpot> spots = [];
     for (int i = 0; i < _tempHistory.length; i++) {
-      spots.add(FlSpot(i.toDouble(), _tempHistory[i]));
+      spots.add(FlSpot(i.toDouble(), _tempHistory[i]['temp']));
     }
 
-    // 如果剛開畫面還沒有收集到資料，就先顯示載入中
     if (spots.isEmpty) {
-      return const SizedBox(
-        height: 140,
-        child: Center(child: Text("正在收集溫度數據 (每20秒更新)...", style: TextStyle(color: Colors.grey, fontSize: 12))),
+      return Container(
+        height: 160,
+        alignment: Alignment.center,
+        child: const Text("正在收集溫度數據中...", style: TextStyle(color: Colors.grey, fontSize: 12)),
       );
     }
 
     return Container(
-      height: 140,
+      height: 180, 
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      padding: const EdgeInsets.fromLTRB(12, 16, 24, 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFBFBFB),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
+      padding: const EdgeInsets.fromLTRB(4, 16, 20, 4),
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
@@ -438,12 +541,11 @@ class _ServicePageState extends State<ServicePage> {
             show: true,
             rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), // 隱藏底部雜亂的 index 軸點
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
                 reservedSize: 32,
-                interval: 20, // 縱軸每 20 度畫一條橫線線標
+                interval: 20, 
                 getTitlesWidget: (value, meta) {
                   return Text(
                     '${value.toInt()}°C',
@@ -452,22 +554,56 @@ class _ServicePageState extends State<ServicePage> {
                 },
               ),
             ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 24,
+                interval: 2.0, 
+                getTitlesWidget: (value, meta) {
+                  final int index = value.round();
+                  
+                  if (index >= 0 && index < _tempHistory.length) {
+                    try {
+                      final dynamic entry = _tempHistory[index];
+                      if (entry is Map) {
+                        final String? rawTime = entry['time']?.toString();
+                        if (rawTime != null) {
+                          List<String> parts = rawTime.split(':');
+                          String timeLabel = parts.length >= 2 ? "${parts[0]}:${parts[1]}" : rawTime;
+
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6.0),
+                            child: Text(
+                              timeLabel,
+                              style: const TextStyle(color: Colors.black38, fontSize: 9, fontWeight: FontWeight.bold),
+                            ),
+                          );
+                        }
+                      }
+                    } catch (e) {
+                      return const SizedBox.shrink();
+                    }
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
+            ),
           ),
           borderData: FlBorderData(show: false),
           minX: 0,
           maxX: (_maxDataPoints - 1).toDouble(),
           minY: 0,
-          maxY: 100, // 與儀表板刻度一致
+          maxY: 100, 
           lineBarsData: [
             LineChartBarData(
               spots: spots,
-              isCurved: true, // 曲線平滑
+              isCurved: true, 
               color: _currentTemperature >= tempDangerMin 
                   ? Colors.red 
                   : (_currentTemperature >= tempWarnMin ? Colors.amber : Colors.blue),
               barWidth: 3,
               isStrokeCapRound: true,
-              dotData: const FlDotData(show: true), // 顯示數據點的小圓圈
+              dotData: const FlDotData(show: true), 
               belowBarData: BarAreaData(
                 show: true,
                 color: (_currentTemperature >= tempDangerMin 
@@ -481,7 +617,6 @@ class _ServicePageState extends State<ServicePage> {
       ),
     );
   }
-
   // 🔌 動態耗電狀態看板 UI
   Widget _buildPowerStatusPanel() {
     bool isWaste = _currentPowerState == 'waste';
