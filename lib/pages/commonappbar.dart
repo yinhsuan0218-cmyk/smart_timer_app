@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // 💡 引入以取得目前登入使用者
 import 'ai.dart';
+
 class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBackButton;
   final List<Widget>? actions;
-  final bool showAiAssistant; // ✨ 新增：是否顯示 AI 助理按鈕（預設開啟）
+  final bool showAiAssistant; // ✨ 是否顯示 AI 助理按鈕（預設開啟）
 
   const CommonAppBar({
     super.key, 
@@ -12,14 +15,99 @@ class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.showAiAssistant = true, // 預設每個頁面都顯示 AI 助理
   });
 
-  // 🤖 彈出 AI 智慧對話視窗
-  void _showAiChatSheet(BuildContext context) {
+  // 💡 修改名稱為 _openAiAssistantSheet 避開與 showAiAssistant 變數衝突
+  void _openAiAssistantSheet(BuildContext context, String userId) {
+    final databaseRef = FirebaseDatabase.instance.ref();
+
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // 允許高度隨鍵盤彈出自動調整
-      backgroundColor: Colors.transparent, 
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (context) {
-        return const AiChatSheet();
+        // 🔄 使用 StreamBuilder 實時監聽該使用者的 Firebase 資料
+        return StreamBuilder<DatabaseEvent>(
+          stream: databaseRef.child('users/$userId').onValue,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.black),
+              );
+            }
+
+            if (snapshot.hasError || !snapshot.hasData || snapshot.data?.snapshot.value == null) {
+              // 💡 修正：如果沒資料或出錯，傳入空陣列，避免 AiChatSheet 建構子少傳參數報錯
+              return const AiChatSheet(zones: [], services: [], schedules: []);
+            }
+
+            // 📦 開始解析從 Firebase 拿到的原始 Map 資料
+            final rawData = Map<dynamic, dynamic>.from(snapshot.data!.snapshot.value as Map);
+
+            // 1. 解析 Zones (對應你的 Zone class)
+            List<Zone> loadedZones = [];
+            if (rawData['zones'] != null) {
+              final zonesMap = Map<dynamic, dynamic>.from(rawData['zones']);
+              zonesMap.forEach((key, value) {
+                final zoneData = Map<dynamic, dynamic>.from(value);
+                
+                // 💡 關鍵安全防護：在這裡就做好溫度的防呆解析
+                double parsedTemp = 0.0;
+                final rawTemp = zoneData['temperature'];
+                if (rawTemp != null) {
+                  if (rawTemp is num) {
+                    parsedTemp = rawTemp.toDouble();
+                  } else if (rawTemp is String) {
+                    parsedTemp = double.tryParse(rawTemp) ?? 0.0;
+                  }
+                }
+
+                loadedZones.add(Zone(
+                  id: key.toString(),
+                  name: zoneData['name'] ?? '未命名區域',
+                  temperature: parsedTemp, // ✨ 帶入安全解析後的溫度
+                  power: zoneData['power'] ?? 'safe',
+                ));
+              });
+            }
+
+            // 2. 解析 Services (對應你的 Service class)
+            List<Service> loadedServices = [];
+            if (rawData['services'] != null) {
+              final servicesMap = Map<dynamic, dynamic>.from(rawData['services']);
+              servicesMap.forEach((key, value) {
+                final serviceData = Map<dynamic, dynamic>.from(value);
+                loadedServices.add(Service(
+                  id: key.toString(),
+                  name: serviceData['name'] ?? '未命名服務',
+                ));
+              });
+            }
+
+            // 3. 解析 Schedules (對應你的 Schedule class)
+            List<Schedule> loadedSchedules = [];
+            if (rawData['schedules'] != null) {
+              final schedulesList = List<dynamic>.from(rawData['schedules']);
+              for (var item in schedulesList) {
+                if (item != null) {
+                  final schMap = Map<dynamic, dynamic>.from(item);
+                  // 將 Firebase 的 [true, true...] 轉成 List<bool>
+                  final List<bool> weekdays = List<bool>.from(schMap['weekdays'] ?? List.filled(7, false));
+                  loadedSchedules.add(Schedule(
+                    weekdays,
+                    schMap['start'] ?? '00:00',
+                    schMap['end'] ?? '00:00',
+                  ));
+                }
+              }
+            }
+
+            // 🚀 將實時資料，直接丟給你的 AI 助理！
+            return AiChatSheet(
+              zones: loadedZones,
+              services: loadedServices,
+              schedules: loadedSchedules,
+            );
+          },
+        );
       },
     );
   }
@@ -56,7 +144,17 @@ class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
                 size: 20,
               ),
             ),
-            onPressed: () => _showAiChatSheet(context),
+            onPressed: () {
+              // 💡 點擊時，獲取目前登入使用者的 UID 並開啟實時監聽助理
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              if (uid != null) {
+                _openAiAssistantSheet(context, uid);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('尚未登入，無法取得 AI 助理資料')),
+                );
+              }
+            },
           ),
         ),
       );
