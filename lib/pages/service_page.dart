@@ -104,12 +104,40 @@ class _ServicePageState extends State<ServicePage> {
     });
   }
 
+  // 📊 耗電趨勢圖相關變數
+  final List<Map<String, dynamic>> _powerHistory = []; 
+  final int _maxPowerPoints = 8; // 最多顯示 8 筆紀錄
+  StateSetter? _powerSheetStateSetter; // 用於通知耗電 BottomSheet 實時重繪
+
+  // 🔌 實時監聽耗電功率
   void _listenToPowerState() {
     _zoneRef.child('power').onValue.listen((event) {
       if (event.snapshot.value != null) {
+        String rawValue = event.snapshot.value.toString().trim();
+        double power = rawValue.isEmpty ? 0.0 : (double.tryParse(rawValue) ?? 0.0);
+
+        final DateTime now = DateTime.now();
+        final String formattedTime = 
+            "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
         setState(() {
-          _currentPowerState = event.snapshot.value.toString();
+          _currentPowerState = rawValue; // 保持你原本的變數更新
+
+          // 新增至耗電歷史紀錄
+          _powerHistory.add({
+            'power': power,
+            'time': formattedTime,
+          });
+
+          if (_powerHistory.length > _maxPowerPoints) {
+            _powerHistory.removeAt(0);
+          }
         });
+
+        // 🔔 如果耗電 BottomSheet 此時是打開狀態，強制觸發它的局部重繪
+        if (_powerSheetStateSetter != null) {
+          _powerSheetStateSetter!(() {});
+        }
       }
     });
   }
@@ -321,7 +349,184 @@ class _ServicePageState extends State<ServicePage> {
       _sheetStateSetter = null;
     });
   }
+  // ⚡ 彈出式耗電趨勢圖小視窗
+void _showPowerChartBottomSheet() {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent, // 讓容器展現手繪風邊框與陰影
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (BuildContext context, StateSetter setModalState) {
+          _powerSheetStateSetter = setModalState;
 
+          return Container(
+            margin: const EdgeInsets.all(16), // 浮空感
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: Colors.black, width: 2), // 連貫黑框風格
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.15),
+                  blurRadius: 15,
+                  offset: const Offset(0, 5),
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 頂部小拉條
+                Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.bolt_rounded, color: Colors.amber, size: 24),
+                        const SizedBox(width: 8),
+                        Text(
+                          "${widget.zoneName} 實時功率趨勢",
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded, color: Colors.black),
+                    )
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // 繪製耗電折線圖
+                _buildPowerChart(),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  ).then((_) {
+    _powerSheetStateSetter = null; // 關閉時清空引用
+  });
+}
+
+// 📊 耗電折線趨勢圖
+Widget _buildPowerChart() {
+  List<FlSpot> spots = [];
+  for (int i = 0; i < _powerHistory.length; i++) {
+    spots.add(FlSpot(i.toDouble(), _powerHistory[i]['power']));
+  }
+
+  if (spots.isEmpty) {
+    return Container(
+      height: 160,
+      alignment: Alignment.center,
+      child: const Text("正在收集耗電數據中...", style: TextStyle(color: Colors.grey, fontSize: 12)),
+    );
+  }
+
+  // 計算最大 Y 軸值，動態調整圖表高度（避免功率很小或很大時超出圖表）
+  double maxPowerInHistory = _powerHistory.map((e) => e['power'] as double).reduce((a, b) => a > b ? a : b);
+  double maxY = maxPowerInHistory < 10 ? 10 : (maxPowerInHistory * 1.2); 
+
+  return Container(
+    height: 180, 
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(4, 16, 20, 4),
+    child: LineChart(
+      LineChartData(
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          getDrawingHorizontalLine: (value) => FlLine(
+            color: Colors.grey.withOpacity(0.15),
+            strokeWidth: 1,
+          ),
+        ),
+        titlesData: FlTitlesData(
+          show: true,
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 32,
+              getTitlesWidget: (value, meta) {
+                return Text(
+                  '${value.toInt()}W',
+                  style: const TextStyle(color: Colors.black45, fontSize: 10, fontWeight: FontWeight.bold),
+                );
+              },
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 24,
+              interval: 2.0, 
+              getTitlesWidget: (value, meta) {
+                final int index = value.round();
+                if (index >= 0 && index < _powerHistory.length) {
+                  try {
+                    final dynamic entry = _powerHistory[index];
+                    if (entry is Map) {
+                      final String? rawTime = entry['time']?.toString();
+                      if (rawTime != null) {
+                        List<String> parts = rawTime.split(':');
+                        String timeLabel = parts.length >= 2 ? "${parts[0]}:${parts[1]}" : rawTime;
+
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6.0),
+                          child: Text(
+                            timeLabel,
+                            style: const TextStyle(color: Colors.black38, fontSize: 9, fontWeight: FontWeight.bold),
+                          ),
+                        );
+                      }
+                    }
+                  } catch (e) {
+                    return const SizedBox.shrink();
+                  }
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        minX: 0,
+        maxX: (_maxPowerPoints - 1).toDouble(),
+        minY: 0,
+        maxY: maxY, 
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true, 
+            color: Colors.green, // 使用環保節能綠
+            barWidth: 3,
+            isStrokeCapRound: true,
+            dotData: const FlDotData(show: true), 
+            belowBarData: BarAreaData(
+              show: true,
+              color: Colors.green.withOpacity(0.1),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
   @override
   Widget build(BuildContext context) {
     final statusData = _getTemperatureStatus(_currentTemperature);
@@ -617,76 +822,118 @@ class _ServicePageState extends State<ServicePage> {
       ),
     );
   }
-  // 🔌 動態耗電狀態看板 UI
-  Widget _buildPowerStatusPanel() {
-    bool isWaste = _currentPowerState == 'waste';
+// 🔌 動態耗電狀態看板 UI
+Widget _buildPowerStatusPanel() {
+  bool isWaste = _currentPowerState == 'waste';
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(
-        color: isWaste ? const Color(0xFFFFF3E0) : const Color(0xFFF9F9F9),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isWaste ? const Color(0xFFD84315) : Colors.black26, 
-          width: isWaste ? 2.0 : 1.0
-        ),
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16), 
+    decoration: BoxDecoration(
+      color: isWaste ? const Color(0xFFFFF3E0) : const Color(0xFFF9F9F9),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+        color: isWaste ? const Color(0xFFD84315) : Colors.black26, 
+        width: isWaste ? 2.0 : 1.0,
       ),
-      child: Row(
-        children: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              Padding(
-                padding: isWaste ? const EdgeInsets.only(top: 6.0) : EdgeInsets.zero,
-                child: Icon(
-                  Icons.power, 
-                  size: 38, 
-                  color: isWaste ? const Color(0xFF424242) : Colors.green[600]
-                ),
-              ),
-              if (isWaste)
-                const Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Icon(
-                    Icons.volcano, 
-                    size: 24, 
-                    color: Color(0xFFFF3D00),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 1️⃣ 上半部：插頭圖標與文字內容（垂直置中對齊）
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center, // ✨ 讓插頭與右側文字水平中線對齊
+          children: [
+            Stack(
+              alignment: Alignment.center,
               children: [
-                Text(
-                  isWaste ? "💥 偵測到電力過度浪費！" : "🌱 用電量處於安全範圍",
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: isWaste ? const Color(0xFFD84315) : Colors.green[800],
+                Padding(
+                  // 移除偏置的 Padding，讓 icon 回歸幾何中心置中
+                  padding: EdgeInsets.zero, 
+                  child: Icon(
+                    Icons.power, 
+                    size: 38, 
+                    color: isWaste ? const Color(0xFF424242) : Colors.green[600],
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  isWaste ? "此區域目前呈現嚴重耗電，請檢查是否有無人使用的電器正開著。" : "目前本區域的實時總耗電量正常。",
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isWaste ? const Color(0xFFBF360C) : Colors.black54,
+                if (isWaste)
+                  const Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Icon(
+                      Icons.volcano, 
+                      size: 20, // 稍微縮小一點避免破壞置中平衡
+                      color: Color(0xFFFF3D00),
+                    ),
                   ),
+              ],
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center, // ✨ 確保兩行文字垂直方向居中
+                children: [
+                  Text(
+                    isWaste ? "💥 偵測到電力過度浪費！" : "🌱 用電量處於安全範圍",
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: isWaste ? const Color(0xFFD84315) : Colors.green[800],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isWaste ? "此區域目前呈現嚴重耗電，請檢查是否有無人使用的電器正開著。" : "目前本區域的實時總耗電量正常。",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isWaste ? const Color(0xFFBF360C) : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        
+        const SizedBox(height: 16), // 上下區塊的間距
+
+        // 2️⃣ 下半部：橫跨一整條的按鈕（保持原本霸氣的寬度）
+        InkWell(
+          onTap: _showPowerChartBottomSheet,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: double.infinity, 
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black, width: 1.5),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black,
+                  offset: Offset(2, 2), 
+                ),
+              ],
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.analytics_outlined, size: 16, color: Colors.black),
+                SizedBox(width: 6),
+                Text(
+                  '查看實時耗電趨勢圖', 
+                  style: TextStyle(fontSize: 13, color: Colors.black, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildDeviceCard(Map<String, dynamic> device) {
     bool isActive = device['is_active'] ?? false;
     String id = device['id'];
