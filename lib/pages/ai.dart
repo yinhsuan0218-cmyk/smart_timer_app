@@ -542,11 +542,42 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
     if (!_isListening) {
       bool available = await _speech.initialize();
       if (available) {
-        setState(() => _isListening = true);
+        setState(() {
+          _isListening = true;
+          _textController.clear(); // 1. 開始錄音前先清空輸入框，避免舊文字干擾
+        });
+        
         _speech.listen(
-          onResult: (val) => setState(() => _textController.text = val.recognizedWords),
+          onResult: (val) {
+            setState(() {
+              _textController.text = val.recognizedWords; // 2. 即時將辨識文字填入輸入框
+            });
+
+            // =======================================================
+            // 核心邏輯：當語音套件判定「整句話說完」（finalResult 為 true）
+            // =======================================================
+            if (val.finalResult && val.recognizedWords.trim().isNotEmpty) {
+              final textToSend = val.recognizedWords;
+              
+              // 1. 停止監聽並恢復 UI 的麥克風/波動動畫狀態
+              _speech.stop();
+              setState(() {
+                _isListening = false;
+                _soundLevel = 0.0;
+              });
+
+              // 2. 稍微延遲（150ms）讓 UI 更新完成後，自動發送指令
+              Future.delayed(const Duration(milliseconds: 150), () {
+                _sendMessage(textToSend);
+              });
+            }
+          },
           onSoundLevelChange: (level) => setState(() => _soundLevel = level),
           localeId: 'zh_TW',
+          // listenFor: 限制單次錄音最長 20 秒
+          // pauseFor: 使用者停止說話後，停頓 2.5 秒即自動切斷並判定為 finalResult
+          listenFor: const Duration(seconds: 20),
+          pauseFor: const Duration(milliseconds: 2500), 
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -554,8 +585,19 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
         );
       }
     } else {
-      setState(() => _isListening = false);
+      // =======================================================
+      // 主動手動干預：如果錄音中再次點擊麥克風，代表手動結束
+      // =======================================================
       _speech.stop();
+      setState(() {
+        _isListening = false;
+        _soundLevel = 0.0;
+      });
+      
+      // 若手動切斷時輸入框已有辨識文字，也直接幫使用者自動送出
+      if (_textController.text.trim().isNotEmpty) {
+        _sendMessage(_textController.text);
+      }
     }
   }
 
