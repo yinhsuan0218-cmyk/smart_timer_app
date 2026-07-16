@@ -576,6 +576,17 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
     });
   }
 
+  // ==========================================
+  // 新增：常用快捷指令定義
+  // ==========================================
+  final List<Map<String, String>> _quickActions = [
+    {"label": "🌡️ 各區溫度", "cmd": "目前各區溫度幾度？"},
+    {"label": "⏰ 今日排程", "cmd": "查詢今日排程"},
+    {"label": "⚡ 耗電狀態", "cmd": "哪些裝置正在耗電？"},
+    {"label": "⚠️ 異常警告", "cmd": "有沒有異常通知？"},
+    {"label": "🔌 關閉所有裝置", "cmd": "關閉所有裝置"}, // 可延伸實作
+  ];
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -583,7 +594,7 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
     return Container(
       margin: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
       padding: const EdgeInsets.all(16),
-      height: MediaQuery.of(context).size.height * 0.7,
+      height: MediaQuery.of(context).size.height * 0.75, // 稍微拉高高度以容納按鈕列
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(28),
@@ -668,7 +679,54 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
           ),
 
           if (_isListening) _buildVoiceWaveform(),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
+
+          // ==========================================
+          // 新增：橫向滾動的自動輸入快捷按鈕列
+          // ==========================================
+          SizedBox(
+            height: 38,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _quickActions.length,
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              itemBuilder: (context, index) {
+                final action = _quickActions[index];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: InkWell(
+                    onTap: () => _sendMessage(action["cmd"]!), // 點擊直接送出指令
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.black, width: 1.5),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black,
+                            offset: Offset(2, 2),
+                          )
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          action["label"]!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
 
           // 輸入控制列
           Row(
