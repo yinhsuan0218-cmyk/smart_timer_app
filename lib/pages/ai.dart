@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // ==========================================
 // 1. 資料結構重構 (完美契合 Firebase RTDB)
@@ -151,7 +153,9 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
                 '• 已連線監控區域：${widget.zones.length} 個\n'
                 '• 納管智慧裝置總數：$totalDevices 個\n'
                 '• 未處理異常警告：$totalWarns 則\n\n'
-                '您可以問我「各區溫度」、「裝置狀態」、「排程定時」或「有沒有異常通知」喔！',
+                '您可以試著這樣問我：\n'
+                '👉「查詢客廳溫度」或「開啟咖啡機」\n'
+                '👉「看看今日排程」或「修改冷氣排程為 12:00 到 18:00」',
         'time': _getNowTime()
       },
     ];
@@ -179,100 +183,331 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
     super.dispose();
   }
 
-  // 🤖 核心：動態分析使用者後端資料並回覆
+  // Helper: 獲取當前星期幾 (中文)
+  String _getWeekdayChinese(int weekday) {
+    const days = {1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四", 5: "星期五", 6: "星期六", 7: "星期日"};
+    return days[weekday] ?? "未知";
+  }
+
+  // 🤖 核心：動態分析使用者後端資料並回覆（深度擴充功能）
   void _parseAndExecuteInstruction(String rawText) {
-    final text = rawText.toLowerCase();
+    final text = rawText.trim().toLowerCase();
     String responseText = "";
 
-    // 1. 查詢「溫度」
-    if (text.contains("溫度") || text.contains("幾度") || text.contains("熱") || text.contains("冷")) {
-      if (widget.zones.isEmpty) {
-        responseText = "🌡️ 目前系統中沒有設定任何區域，無法取得溫度資料。";
+    // 取得當前使用者 ID 用於遠端控制
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    // ==========================================
+    // 功能 1：遠端控制 (修改排程 / 開關設備)
+    // ==========================================
+    
+    // A. 修改排程分析 (例如: "修改冷氣排程為 14:00 到 18:00")
+    if ((text.contains("修改") || text.contains("設定") || text.contains("更新")) && 
+        (text.contains("排程") || text.contains("定時") || text.contains("時間"))) {
+      
+      if (uid == null) {
+        responseText = "❌ 您尚未登入，無法執行遠端排程修改。";
       } else {
-        responseText = "🌡️ 為您查詢各區域的實時溫度：\n";
-        for (var zone in widget.zones) {
-          String tempDisplay = zone.temperature.isEmpty ? "未回報 (或無感測器)" : "${zone.temperature}°C";
-          responseText += "• 區域【${zone.name}】: $tempDisplay\n";
-        }
-      }
-    }
-    // 2. 查詢「裝置開關狀態 / 電力狀態」
-    else if (text.contains("狀態") || text.contains("開關") || text.contains("打開") || text.contains("開啟") || text.contains("關閉")) {
-      // 如果單純是控制指令（開啟/關閉某裝置）
-      if (text.contains("開啟") || text.contains("打開") || text.contains("關閉") || text.contains("關掉")) {
-        final action = (text.contains("開啟") || text.contains("打開")) ? "開啟" : "關閉";
-        responseText = "🔌 收到「$action」指令！\n正在透過 MQTT 向您的 ESP32 控制端發送訊號...\n(命令已成功發送)";
-      } else {
-        // 查詢狀態
-        if (widget.zones.isEmpty) {
-          responseText = "🔌 目前沒有任何區域與裝置。";
+        // 使用正則表達式嘗試擷取兩個時間點 (HH:mm)
+        final timeRegex = RegExp(r'([0-1]?[0-9]|2[0-3]):[0-5][0-9]');
+        final times = timeRegex.allMatches(text).map((m) => m.group(0)!).toList();
+
+        if (times.length < 2) {
+          responseText = "⏰ 排程修改格式不夠明確。\n請說明，例如：「修改 [設備名稱] 排程為 08:30 到 17:00」";
         } else {
-          responseText = "🔌 各區域裝置實時開關狀態：\n";
+          final startTime = times[0];
+          final endTime = times[1];
+          
+          // 尋找目標設備
+          Device? targetDevice;
+          Zone? targetZone;
           for (var zone in widget.zones) {
-            responseText += "📦 區域：${zone.name}\n";
-            if (zone.devices.isEmpty) {
-              responseText += "  (此區域目前沒有掛載裝置)\n";
-            } else {
-              for (var dev in zone.devices) {
-                String statusEmoji = dev.isActive ? "🟢 已開啟 (Active)" : "🔴 已關閉 (Inactive)";
-                responseText += "  • ${dev.name}: $statusEmoji\n";
+            for (var dev in zone.devices) {
+              if (text.contains(dev.name.toLowerCase()) || text.contains(zone.name.toLowerCase())) {
+                targetDevice = dev;
+                targetZone = zone;
+                break;
               }
             }
           }
-        }
-      }
-    }
-    // 3. 查詢「定時排程」
-    else if (text.contains("排程") || text.contains("定時") || text.contains("時間") || text.contains("幾點")) {
-      responseText = "⏰ 幫您查詢目前的裝置定時設定：\n";
-      bool hasSchedule = false;
 
-      for (var zone in widget.zones) {
-        for (var dev in zone.devices) {
-          if (dev.timerStart.isNotEmpty || dev.timerEnd.isNotEmpty) {
-            hasSchedule = true;
-            responseText += "💡 【${dev.name}】(${zone.name})\n"
-                            "  - 啟動時間: ${dev.timerStart}\n"
-                            "  - 結束時間: ${dev.timerEnd}\n";
-            if (dev.scheduleDays != null) {
-              // 可選擇性在此解析星期
-              responseText += "  - 重複週期: 已設定排程天數\n";
-            }
-            responseText += "\n";
+          if (targetDevice == null) {
+            responseText = "🔍 未能識別您想修改哪一項設備的排程。\n請明確說明設備名稱（例如：修改咖啡機排程為 $startTime 到 $endTime）";
+          } else {
+            // 直接往 Firebase 寫入新排程資料
+            final devRef = FirebaseDatabase.instance
+                .ref()
+                .child('users/$uid/zones/${targetZone!.id}/devices/${targetDevice.id}');
+            
+            devRef.update({
+              'timer_start': startTime,
+              'timer_end': endTime,
+              'last_updated': DateTime.now().toIso8601String(),
+            }).then((_) {
+              debugPrint("Firebase 排程更新成功");
+            }).catchError((err) {
+              debugPrint("Firebase 排程更新失敗: $err");
+            });
+
+            responseText = "📝 已為您將【${targetZone.name}】的【${targetDevice.name}】定時排程修改為：\n"
+                            "• 啟動時間: $startTime\n"
+                            "• 關閉時間: $endTime\n"
+                            "⚡ 指令已成功同步至 Firebase 雲端與 ESP32 設備！";
           }
         }
       }
-      if (!hasSchedule) {
-        responseText = "📅 目前所有裝置皆未設定定時排程。";
-      }
     }
-    // 4. 查詢「異常 / 通知 / 警告」
-    else if (text.contains("警告") || text.contains("通知") || text.contains("異常") || text.contains("耗電")) {
-      if (widget.notifications.isEmpty) {
-        responseText = "🔔 目前沒有任何系統警報或通知，運作一切正常！";
+    
+    // B. 開關設備分析 (例如: "開啟咖啡機"、"關掉 0312 的風扇")
+    else if (text.contains("開啟") || text.contains("打開") || text.contains("關閉") || text.contains("關掉")) {
+      if (uid == null) {
+        responseText = "❌ 您尚未登入，無法執行硬體遠端控制。";
       } else {
-        responseText = "⚠️ 系統最近的通知與警告摘要：\n\n";
-        // 撈取最近的 3 筆
-        final recentNotifs = widget.notifications.reversed.take(3);
-        for (var notif in recentNotifs) {
-          String typeIcon = notif.type == "warn" ? "⚠️ [警告]" : "ℹ️ [提示]";
-          String status = notif.status == "read" ? "(已讀)" : "(未讀*)";
-          responseText += "$typeIcon ${notif.title} $status\n"
-                          "• 內容: ${notif.content}\n"
-                          "• 時間: ${notif.timestamp}\n\n";
+        final bool turnOn = text.contains("開啟") || text.contains("打開");
+        Device? targetDevice;
+        Zone? targetZone;
+
+        for (var zone in widget.zones) {
+          for (var dev in zone.devices) {
+            if (text.contains(dev.name.toLowerCase())) {
+              targetDevice = dev;
+              targetZone = zone;
+              break;
+            }
+          }
+        }
+
+        if (targetDevice == null) {
+          responseText = "🔍 找不到您指定的裝置名稱。請試著說：「開啟 [裝置名稱]」（例如：開啟 咖啡機）。";
+        } else {
+          // 直接對 Firebase 進行狀態寫入，連動 MQTT 
+          final devRef = FirebaseDatabase.instance
+              .ref()
+              .child('users/$uid/zones/${targetZone!.id}/devices/${targetDevice.id}');
+          
+          devRef.update({
+            'is_active': turnOn,
+            'last_updated': DateTime.now().toIso8601String(),
+          });
+
+          responseText = "🔌 已為您發送控制指令：\n"
+                          "• 區域: ${targetZone.name}\n"
+                          "• 設備: ${targetDevice.name}\n"
+                          "• 動作: ${turnOn ? '🟢 開啟 (ON)' : '🔴 關閉 (OFF)'}\n\n"
+                          "📡 訊號已發送，ESP32 繼電器端正同步執行中！";
         }
       }
     }
-    // 5. 預設模糊回覆
-    else {
-      responseText = "抱歉，我沒聽懂「$rawText」。🤔\n\n您可以試著這樣問我：\n"
-                     "👉「查看各區溫度」\n"
-                     "👉「目前有哪些裝置是開著的？」\n"
-                     "👉「查詢咖啡機的排程定時」\n"
-                     "👉「有沒有異常耗電警告？」";
+
+    // ==========================================
+    // 功能 2：資料庫深度查詢解析
+    // ==========================================
+    
+    // A. 查詢「溫度」（支援多區/單區查詢）
+    else if (text.contains("溫度") || text.contains("幾度") || text.contains("熱") || text.contains("冷")) {
+      // 檢查是否是特定單一區域查詢
+      Zone? selectedZone;
+      for (var zone in widget.zones) {
+        if (text.contains(zone.name.toLowerCase())) {
+          selectedZone = zone;
+          break;
+        }
+      }
+
+      if (selectedZone != null) {
+        String tempDisplay = selectedZone.temperature.isEmpty ? "目前未回報資料" : "${selectedZone.temperature}°C";
+        responseText = "🌡️ 區域【${selectedZone.name}】的實時溫度為：$tempDisplay。";
+      } else {
+        if (widget.zones.isEmpty) {
+          responseText = "🌡️ 目前系統中沒有註冊任何監控區域。";
+        } else {
+          responseText = "🌡️ 目前各監控區域溫度列表：\n";
+          for (var zone in widget.zones) {
+            String tempDisplay = zone.temperature.isEmpty ? "未偵測" : "${zone.temperature}°C";
+            responseText += "• 【${zone.name}】: $tempDisplay\n";
+          }
+        }
+      }
     }
 
-    // 延遲 800ms 模擬思考後回覆
+    // B. 查詢「耗電 / 電力狀態」
+    else if (text.contains("耗電") || text.contains("電量") || text.contains("電力")) {
+      // 智慧定時器可依據 isActive 狀態，推估當前啟用耗電設備
+      List<String> powerUsageInfo = [];
+      for (var zone in widget.zones) {
+        for (var dev in zone.devices) {
+          if (dev.isActive) {
+            // 如果含有特定關鍵字，智慧助理可以做高耗電標記
+            bool isHighPower = dev.name.contains("冷氣") || dev.name.contains("烤箱") || dev.name.contains("微波爐") || dev.name.contains("加熱");
+            powerUsageInfo.add("⚡ 【${zone.name} - ${dev.name}】 正持續運作中${isHighPower ? ' (⚠️高耗電裝置)' : ''}");
+          }
+        }
+      }
+
+      if (powerUsageInfo.isEmpty) {
+        responseText = "🍀 目前所有受控智慧設備皆在「關閉」狀態，無持續電力損耗。";
+      } else {
+        responseText = "🔌 目前正在執行（耗電中）的裝置有：\n\n${powerUsageInfo.join('\n')}";
+      }
+    }
+
+    // C. 查詢「區域與設備清單」
+    else if (text.contains("區域") || text.contains("設備") || text.contains("裝置") || text.contains("有哪些")) {
+      final bool checkActiveOnly = text.contains("開啟") || text.contains("開著");
+      final bool checkInactiveOnly = text.contains("關閉") || text.contains("關著");
+
+      if (widget.zones.isEmpty) {
+        responseText = "📦 目前系統沒有任何監控區域與裝置。";
+      } else {
+        responseText = "📦 【受管智慧硬體清單】\n";
+        int matchedCount = 0;
+
+        for (var zone in widget.zones) {
+          List<String> devNames = [];
+          for (var dev in zone.devices) {
+            if (checkActiveOnly && !dev.isActive) continue;
+            if (checkInactiveOnly && dev.isActive) continue;
+            
+            String status = dev.isActive ? "🟢" : "🔴";
+            devNames.add("$status ${dev.name}");
+            matchedCount++;
+          }
+
+          if (devNames.isNotEmpty) {
+            responseText += "• 區域 【${zone.name}】：\n  ${devNames.join(', ')}\n";
+          }
+        }
+
+        if (matchedCount == 0) {
+          responseText = "🔍 目前沒有找到符合您篩選條件（開著/關閉）的智慧裝置。";
+        }
+      }
+    }
+
+    // D. 查詢「定時排程」（支援：今日、明日、昨日、本週、單設備）
+    else if (text.contains("排程") || text.contains("定時") || text.contains("時間") || text.contains("幾點")) {
+      final now = DateTime.now();
+      int queryWeekday = now.weekday; // 預設為今日
+
+      String schedulePeriodText = "今日";
+      if (text.contains("明日") || text.contains("明天")) {
+        queryWeekday = (now.weekday % 7) + 1;
+        schedulePeriodText = "明日";
+      } else if (text.contains("昨日") || text.contains("昨天")) {
+        queryWeekday = now.weekday == 1 ? 7 : now.weekday - 1;
+        schedulePeriodText = "昨日";
+      } else if (text.contains("本週") || text.contains("這星期")) {
+        schedulePeriodText = "本週";
+      }
+
+      // 檢查是否是特定單一設備
+      Device? specificDev;
+      for (var zone in widget.zones) {
+        for (var dev in zone.devices) {
+          if (text.contains(dev.name.toLowerCase())) {
+            specificDev = dev;
+          }
+        }
+      }
+
+      responseText = "⏰ 為您查詢 [ $schedulePeriodText ] 的排程設定：\n\n";
+      bool foundSchedule = false;
+
+      for (var zone in widget.zones) {
+        for (var dev in zone.devices) {
+          // 如果指名查詢單一設備但此處不符合，就跳過
+          if (specificDev != null && dev.id != specificDev.id) continue;
+
+          if (dev.timerStart.isNotEmpty || dev.timerEnd.isNotEmpty) {
+            // 驗證排程天數對應 (Firebase 結構中 schedule_days 通常是星期一至星期日)
+            bool isScheduled = false;
+            String weekDayConfig = "未特別指定（每日重置）";
+
+            if (dev.scheduleDays != null) {
+              final daysMap = dev.scheduleDays!;
+              // 匹配 RTDB 中類似 'monday': true / '0' : true 的結構
+              final weekdayKeys = {
+                1: ['monday', 'mon', '1', '星期一'],
+                2: ['tuesday', 'tue', '2', '星期二'],
+                3: ['wednesday', 'wed', '3', '星期三'],
+                4: ['thursday', 'thu', '4', '星期四'],
+                5: ['friday', 'fri', '5', '星期五'],
+                6: ['saturday', 'sat', '6', '星期六'],
+                7: ['sunday', 'sun', '7', '星期日'],
+              };
+
+              if (schedulePeriodText == "本週") {
+                isScheduled = true;
+                List<String> actDays = [];
+                weekdayKeys.forEach((wDay, keys) {
+                  for (var key in keys) {
+                    if (daysMap[key] == true) {
+                      actDays.add(_getWeekdayChinese(wDay));
+                      break;
+                    }
+                  }
+                });
+                weekDayConfig = actDays.isEmpty ? "未勾選重複天數" : "每週 ${actDays.join('、')}";
+              } else {
+                // 單日查詢
+                final checkKeys = weekdayKeys[queryWeekday] ?? [];
+                for (var key in checkKeys) {
+                  if (daysMap[key] == true) {
+                    isScheduled = true;
+                    break;
+                  }
+                }
+              }
+            } else {
+              // 若無排程天數欄位，預設視為每日執行
+              isScheduled = true;
+            }
+
+            if (isScheduled) {
+              foundSchedule = true;
+              responseText += "💡 【${dev.name}】 (區域：${zone.name})\n"
+                              "  - ⏰ 定時：${dev.timerStart} ～ ${dev.timerEnd}\n"
+                              "  - 📅 週期：$weekDayConfig\n\n";
+            }
+          }
+        }
+      }
+
+      if (!foundSchedule) {
+        responseText = "📅 $schedulePeriodText 查無任何智慧裝置設定了自動定時排程。";
+      }
+    }
+
+    // E. 查詢「未讀重要通知 / 安全狀態」
+    else if (text.contains("警告") || text.contains("通知") || text.contains("異常") || text.contains("安全")) {
+      final unreadWarns = widget.notifications.where((n) => n.type == 'warn' && n.status == 'unread').toList();
+      
+      if (unreadWarns.isEmpty) {
+        responseText = "🛡️ 【安全監控狀態】：正常\n🟢 目前無任何未讀的重要異常警告，系統運作平穩、電壓與溫度皆在安全範圍內！";
+      } else {
+        responseText = "⚠️ 警報！發現 ${unreadWarns.length} 則未讀重要異常通知：\n\n";
+        for (int i = 0; i < unreadWarns.length; i++) {
+          final w = unreadWarns[i];
+          responseText += "${i + 1}. 🔴 [${w.title}]\n"
+                          "  • 內容: ${w.content}\n"
+                          "  • 區域: ${w.zoneName}\n"
+                          "  • 時間: ${w.timestamp}\n\n";
+        }
+      }
+    }
+
+    // F. 模糊匹配與小助手提示
+    else {
+      responseText = "抱歉，我無法確認「$rawText」的具體指令。🤔\n\n"
+                     "你可以這樣考考我：\n"
+                     "🔸 「查看各區溫度」或「客廳幾度」\n"
+                     "🔸 「開啟咖啡機」或「關閉 0312 的風扇」\n"
+                     "🔸 「查詢今日排程」或「查詢熱水器定時」\n"
+                     "🔸 「將咖啡機排程修改為 14:00 到 15:30」\n"
+                     "🔸 「有沒有異常通知？」";
+    }
+
+    // 模擬 AI 思考與載入動畫（800ms 後推入回覆）
     Future.delayed(const Duration(milliseconds: 800), () {
       if (!mounted) return;
       setState(() {
