@@ -7,7 +7,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart'; 
 import 'services/mqtt_service.dart';
 import 'dart:async'; 
-
+import 'services/notification_service.dart';
 // 宣告一個全域變數，用來儲存訂閱，防止重複登入時重複監聽
 StreamSubscription? _globalTempSubscription;
 
