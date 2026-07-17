@@ -174,7 +174,7 @@ void startGlobalTemperatureListener(String uid) {
       // 根據開啟數量與 energy 計算最新的 power 狀態
       String calculatedPowerState = 'safe';
       if (activeDeviceCount == 0) {
-        if (currentEnergy > 2.0) {
+        if (currentEnergy > 200.0) {
           calculatedPowerState = 'waste'; // 沒有裝置卻耗電，判定為浪費
         }
       } else if (activeDeviceCount == 1) {
