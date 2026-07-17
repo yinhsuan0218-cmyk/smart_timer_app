@@ -37,6 +37,10 @@ class _ServicePageState extends State<ServicePage> {
   double _currentTemperature = 70.0; 
   bool _isDangerTriggered = false;   
   String _currentPowerState = 'safe';
+  double _currentVoltage = 0.0;
+  double _currentAmps = 0.0;
+  double _currentWatts = 0.0;
+  double _totalWh = 0.0;
 
   // 📊 溫度趨勢圖相關變數
   final List<Map<String, dynamic>> _tempHistory = []; 
@@ -113,8 +117,12 @@ class _ServicePageState extends State<ServicePage> {
 void _listenToPowerState() {
   _zoneRef.child('energy').onValue.listen((event) {
     if (event.snapshot.value != null) {
-      String rawValue = event.snapshot.value.toString().trim();
-      double energy = rawValue.isEmpty ? 0.0 : (double.tryParse(rawValue) ?? 0.0);
+      final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        
+      double voltage = (data['voltage'] ?? 0.0).toDouble();
+      double current = (data['current'] ?? 0.0).toDouble();
+      double watt = (data['watt'] ?? 0.0).toDouble();
+      double totalWh = (data['total_wh'] ?? 0.0).toDouble();
 
       final DateTime now = DateTime.now();
       final String formattedTime = 
@@ -138,21 +146,21 @@ void _listenToPowerState() {
         
         if (activeDeviceCount == 0) {
           // 沒有裝置在運作，能耗理應接近 0W（給 2W 容許誤差值）
-          if (energy > 200.0) {
+          if (watt > 200.0) {
             power = 'waste'; // 異常漏電或不該供電時有能耗
           } else {
             power = 'safe';
           }
         } else if (activeDeviceCount == 1) {
           // 單一裝置運作，安全能耗上限設在 1200W
-          if (energy > 1200.0) {
+          if (watt > 1200.0) {
             power = 'waste';
           } else {
             power = 'safe';
           }
         } else if (activeDeviceCount >= 2) {
           // 兩個裝置同時運作，總安全能耗上限設在 1600W
-          if (energy > 1600.0) {
+          if (watt > 1600.0) {
             power = 'waste';
           } else {
             power = 'safe';
@@ -161,9 +169,13 @@ void _listenToPowerState() {
 
         setState(() {
           _currentPowerState = power; // 更新狀態變數（畫面上判斷 isWaste 會用到）
+          _currentVoltage = voltage;
+          _currentAmps = current;
+          _currentWatts = watt;
+          _totalWh = totalWh;
 
           _powerHistory.add({
-            'power': energy, // 圖表仍使用當下的數值進行繪製
+            'power': watt, // 圖表仍使用當下的數值進行繪製
             'time': formattedTime,
           });
 
@@ -900,6 +912,28 @@ void _listenToPowerState() {
           
           const SizedBox(height: 16), 
 
+          // 到時候看要不要留
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMeterData(Icons.electric_bolt, "${_currentVoltage.toStringAsFixed(1)} V", "電壓"),
+                Container(height: 30, width: 1, color: Colors.grey.shade300),
+                _buildMeterData(Icons.speed, "${_currentAmps.toStringAsFixed(2)} A", "電流"),
+                Container(height: 30, width: 1, color: Colors.grey.shade300),
+                _buildMeterData(Icons.power_outlined, "${_currentWatts.toStringAsFixed(1)} W", "功率"),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // 2️⃣ 下半部：橫跨整行的查看耗電趨勢按鈕 (2.5D 手繪描邊風格)
           InkWell(
             onTap: _showPowerChartBottomSheet,
@@ -933,6 +967,23 @@ void _listenToPowerState() {
           ),
         ],
       ),
+    );
+  }
+
+  //這也再看要不要留
+  Widget _buildMeterData(IconData icon, String value, String label) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: Colors.grey.shade600),
+            const SizedBox(width: 4),
+            Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(color: Colors.grey.shade500, fontSize: 10)),
+      ],
     );
   }
 
@@ -1019,8 +1070,6 @@ void _listenToPowerState() {
     );
   }
 }
-
-// (GaugePainter 保持不變，故省略以節省篇幅)
 
 class GaugePainter extends CustomPainter {
   final double temperature;
