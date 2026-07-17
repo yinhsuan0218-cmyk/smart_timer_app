@@ -37,6 +37,7 @@ class _ZonePageState extends State<ZonePage> {
           'name': nameController.text.trim(),
           'temperature': 0.0, // ESP32 或感測器尚未回傳前的初始溫度
           'power': 'safe', // 預設耗電狀態
+          'energy': 0.0, // ⚡ 預設電能數據
         });
         Navigator.pop(context);
       }
