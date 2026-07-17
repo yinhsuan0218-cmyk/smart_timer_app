@@ -154,21 +154,63 @@ void startGlobalTemperatureListener(String uid) {
       }
 
       // -------------------------------------------------------------
-      // 2. ⚡ 耗電狀態防護與異常通知邏輯 (已同步修改為讀取新定義的 `power`)
+      // 2. ⚡ 耗電狀態防護與動態安全判定邏輯 (核心邏輯移植至此)
       // -------------------------------------------------------------
-      final String powerState = zone['power'] ?? 'safe'; // 讀取資料庫中代表「用電安全狀態」的新欄位 power
+      // 讀取實時耗電能耗 energy
+      double currentEnergy = double.tryParse(zone['energy']?.toString() ?? '0.0') ?? 0.0;
+      
+      // 計算當前區域開啟（is_active == true）的裝置數量
+      int activeDeviceCount = 0;
+      if (zone['devices'] != null) {
+        final devicesData = zone['devices'] as Map<dynamic, dynamic>;
+        devicesData.forEach((key, value) {
+          final device = Map<String, dynamic>.from(value as Map);
+          if (device['is_active'] == true) {
+            activeDeviceCount++;
+          }
+        });
+      }
+
+      // 根據開啟數量與 energy 計算最新的 power 狀態
+      String calculatedPowerState = 'safe';
+      if (activeDeviceCount == 0) {
+        if (currentEnergy > 2.0) {
+          calculatedPowerState = 'waste'; // 沒有裝置卻耗電，判定為浪費
+        }
+      } else if (activeDeviceCount == 1) {
+        if (currentEnergy > 1200.0) {
+          calculatedPowerState = 'waste'; // 單裝置超過 1200W
+        }
+      } else if (activeDeviceCount >= 2) {
+        if (currentEnergy > 1600.0) {
+          calculatedPowerState = 'waste'; // 雙裝置超過 1600W
+        }
+      }
+
+      // 取得 Firebase 內現有的 power 狀態，避免重複寫入造成迴圈
+      String currentPowerNodeState = zone['power'] ?? 'safe';
+
+      // 如果計算結果與資料庫內目前不一致，主動寫回 Firebase 更新狀態
+      if (calculatedPowerState != currentPowerNodeState) {
+        await db.ref('users/$uid/zones/$zoneId').update({'power': calculatedPowerState});
+        currentPowerNodeState = calculatedPowerState; // 更新快照變數供下方通知邏輯使用
+      }
+
+      // -------------------------------------------------------------
+      // 3. 🔔 耗電異常推播通知判定
+      // -------------------------------------------------------------
       bool isWasteTriggered = zone['is_waste_triggered'] ?? false;
 
-      if (powerState == 'waste') {
+      if (currentPowerNodeState == 'waste') {
         if (!isWasteTriggered) {
           await db.ref('users/$uid/zones/$zoneId').update({'is_waste_triggered': true});
 
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
             'title': '🔌 偵測到異常耗電提醒',
-            'content': '區域【$zoneName】目前有不合適的耗電情形（高於該設備開啟數量的安全範圍）。建議前往確認或關閉閒置裝置。',
+            'content': '區域【$zoneName】目前有不合適的耗電情形（當前開啟 $activeDeviceCount 個裝置，實時能耗達 ${currentEnergy.toStringAsFixed(1)}W）。建議前往確認或關閉閒置裝置。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'warn', // 改為 'warn' 讓前端顯示黃色/橘色
+            'type': 'warn', 
             'status': 'unread', 
             'zone_name': zoneName,
           });
@@ -180,9 +222,9 @@ void startGlobalTemperatureListener(String uid) {
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
             'title': '🌱 耗電狀態已恢復正常',
-            'content': '區域【$zoneName】的用電情況已回到一般安全範圍內。',
+            'content': '區域【$zoneName】的用電情況已回到安全與合理的範圍內（${currentEnergy.toStringAsFixed(1)}W）。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'success', // 改為 'success' 讓前端顯示安全綠
+            'type': 'success', 
             'status': 'unread', 
             'zone_name': zoneName,
           });
