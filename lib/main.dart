@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'services/mqtt_service.dart';
 import 'dart:async'; 
 import 'services/notification_service.dart';
+
 // 宣告一個全域變數，用來儲存訂閱，防止重複登入時重複監聽
 StreamSubscription? _globalTempSubscription;
 
@@ -153,9 +154,9 @@ void startGlobalTemperatureListener(String uid) {
       }
 
       // -------------------------------------------------------------
-      // 2. ⚡ 耗電狀態防護與異常通知邏輯
+      // 2. ⚡ 耗電狀態防護與異常通知邏輯 (已同步修改為讀取新定義的 `power`)
       // -------------------------------------------------------------
-      String powerState = zone['power'] ?? 'safe';
+      final String powerState = zone['power'] ?? 'safe'; // 讀取資料庫中代表「用電安全狀態」的新欄位 power
       bool isWasteTriggered = zone['is_waste_triggered'] ?? false;
 
       if (powerState == 'waste') {
@@ -165,9 +166,9 @@ void startGlobalTemperatureListener(String uid) {
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
             'title': '🔌 偵測到異常耗電提醒',
-            'content': '區域【$zoneName】目前有不合適的耗電情形。建議前往確認或關閉閒置裝置。',
+            'content': '區域【$zoneName】目前有不合適的耗電情形（高於該設備開啟數量的安全範圍）。建議前往確認或關閉閒置裝置。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'warn', // 💡 改為 'warn' 讓前端顯示黃色/橘色
+            'type': 'warn', // 改為 'warn' 讓前端顯示黃色/橘色
             'status': 'unread', 
             'zone_name': zoneName,
           });
@@ -179,9 +180,9 @@ void startGlobalTemperatureListener(String uid) {
           await db.ref('users/$uid/notifications').push().set({
             'zoneId': zoneId,
             'title': '🌱 耗電狀態已恢復正常',
-            'content': '區域【$zoneName】的用電情況已回到一般正常範圍。',
+            'content': '區域【$zoneName】的用電情況已回到一般安全範圍內。',
             'timestamp': DateTime.now().toIso8601String(),
-            'type': 'success', // 💡 改為 'success' 讓前端顯示安全綠
+            'type': 'success', // 改為 'success' 讓前端顯示安全綠
             'status': 'unread', 
             'zone_name': zoneName,
           });
