@@ -330,24 +330,86 @@ class _AiChatSheetState extends State<AiChatSheet> with SingleTickerProviderStat
       }
     }
 
+    // ==========================================
+    // 功能 2：資料庫深度查詢解析 (已升級：各區耗電功能)
+    // ==========================================
+    
     // B. 查詢「耗電 / 電力狀態」
-    else if (text.contains("耗電") || text.contains("電量") || text.contains("電力")) {
-      // 智慧定時器可依據 isActive 狀態，推估當前啟用耗電設備
-      List<String> powerUsageInfo = [];
+    else if (text.contains("耗電") || text.contains("電量") || text.contains("電力") || text.contains("瓦數")) {
+      // 1. 檢查使用者是否指定了「特定區域」（例如：「查詢客廳的耗電」）
+      Zone? selectedZone;
       for (var zone in widget.zones) {
-        for (var dev in zone.devices) {
-          if (dev.isActive) {
-            // 如果含有特定關鍵字，智慧助理可以做高耗電標記
-            bool isHighPower = dev.name.contains("冷氣") || dev.name.contains("烤箱") || dev.name.contains("微波爐") || dev.name.contains("加熱");
-            powerUsageInfo.add("⚡ 【${zone.name} - ${dev.name}】 正持續運作中${isHighPower ? ' (⚠️高耗電裝置)' : ''}");
-          }
+        if (text.contains(zone.name.toLowerCase())) {
+          selectedZone = zone;
+          break;
         }
       }
 
-      if (powerUsageInfo.isEmpty) {
-        responseText = "🍀 目前所有受控智慧設備皆在「關閉」狀態，無持續電力損耗。";
+      if (selectedZone != null) {
+        // --- 情境 A：查詢特定區域的耗電 ---
+        List<String> zonePowerInfo = [];
+        int activeCount = 0;
+
+        for (var dev in selectedZone.devices) {
+          if (dev.isActive) {
+            activeCount++;
+            bool isHighPower = dev.name.contains("冷氣") || dev.name.contains("烤箱") || dev.name.contains("微波爐") || dev.name.contains("加熱");
+            zonePowerInfo.add("  • 🟢 【${dev.name}】 運作中${isHighPower ? ' (⚠️高耗電)' : ''}");
+          } else {
+            zonePowerInfo.add("  • 🔴 【${dev.name}】 已關閉");
+          }
+        }
+
+        if (activeCount == 0) {
+          responseText = "🍀 區域【${selectedZone.name}】目前狀態：\n"
+                         "所有智慧裝置皆在「關閉」狀態，此區域無持續電力損耗。";
+        } else {
+          responseText = "⚡ 區域【${selectedZone.name}】耗電分析：\n"
+                         "目前共有 $activeCount 個裝置正在運作中：\n\n"
+                         "${zonePowerInfo.join('\n')}\n\n"
+                         "💡 提示：若不需使用，可對我說「關閉 ${selectedZone.name} 的 [設備名稱]」來節省電力。";
+        }
+
       } else {
-        responseText = "🔌 目前正在執行（耗電中）的裝置有：\n\n${powerUsageInfo.join('\n')}";
+        // --- 情境 B：未指定區域，列出「各監控區域」的整體耗電摘要 ---
+        if (widget.zones.isEmpty) {
+          responseText = "🔌 目前系統中沒有註冊任何監控區域。";
+        } else {
+          responseText = "⚡ 【各監控區域實時耗電摘要】\n\n";
+          bool totalAnyActive = false;
+
+          for (var zone in widget.zones) {
+            List<String> activeDevicesInZone = [];
+            int zoneHighPowerCount = 0;
+
+            for (var dev in zone.devices) {
+              if (dev.isActive) {
+                bool isHighPower = dev.name.contains("冷氣") || dev.name.contains("烤箱") || dev.name.contains("微波爐") || dev.name.contains("加熱");
+                activeDevicesInZone.add("${dev.name}${isHighPower ? '(⚠️)' : ''}");
+                if (isHighPower) zoneHighPowerCount++;
+                totalAnyActive = true;
+              }
+            }
+
+            // 動態組裝該區域的文字
+            responseText += "🏢 【${zone.name}】:\n";
+            if (activeDevicesInZone.isEmpty) {
+              responseText += "  └─ 🟢 節能中 (無裝置開啟，0 損耗)\n";
+            } else {
+              responseText += "  └─ ⚡ 運作中: ${activeDevicesInZone.join('、')}\n";
+              if (zoneHighPowerCount > 0) {
+                responseText += "     (偵測到 $zoneHighPowerCount 個高耗電負載運行中)\n";
+              }
+            }
+            responseText += "\n";
+          }
+
+          if (!totalAnyActive) {
+            responseText = "🍀 【全家安全節能中】\n目前全系統所有區域的設備皆處於關閉狀態，表現完美！";
+          } else {
+            responseText += "💡 您可以對我說：「查詢 [特定區域] 耗電」以取得詳細的設備節能建議。";
+          }
+        }
       }
     }
 
