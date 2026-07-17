@@ -138,7 +138,7 @@ void _listenToPowerState() {
         
         if (activeDeviceCount == 0) {
           // 沒有裝置在運作，能耗理應接近 0W（給 2W 容許誤差值）
-          if (energy > 2.0) {
+          if (energy > 200.0) {
             power = 'waste'; // 異常漏電或不該供電時有能耗
           } else {
             power = 'safe';
