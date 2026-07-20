@@ -7,6 +7,7 @@ import 'zone_page.dart';
 import 'user_page.dart';
 import 'commonappbar.dart';
 import 'notification_page.dart'; 
+import 'settings_page.dart'; // 👈 替換成你的設定頁面路徑
 
 class NavPage extends StatefulWidget {
   const NavPage({super.key});
@@ -147,7 +148,8 @@ class _NavPageState extends State<NavPage> {
     const ZonePage(),         
     const HomePage(),         
     const NotificationPage(), 
-    const UserPage(),         
+    const UserPage(),     
+    const SettingsPage(), // 👈 新增設定頁面    
   ];
 
   // 💡 自訂雙色外掛 Badge 組件
@@ -250,6 +252,12 @@ class _NavPageState extends State<NavPage> {
               icon: Icon(Icons.person_outline_rounded),
               activeIcon: Icon(Icons.person_rounded),
               label: 'User',
+            ),
+            // 👇 新增設定 Icon
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.settings_outlined),
+              activeIcon: Icon(Icons.settings_rounded),
+              label: 'Settings',
             ),
           ],
         ),
